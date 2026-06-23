@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+  scanner:
+    build: .
+    command: python src/main.py scan
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  dashboard:
+    build: .
+    command: python src/main.py dashboard
+    env_file: .env
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      - scanner
+    restart: unless-stopped

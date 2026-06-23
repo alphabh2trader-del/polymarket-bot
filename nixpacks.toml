@@ -1,0 +1,5 @@
+[phases.setup]
+nixPkgs = ["python311"]
+
+[start]
+cmd = "streamlit run src/dashboard/app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true"

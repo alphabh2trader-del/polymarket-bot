@@ -1,0 +1,30 @@
+# Core
+anthropic>=0.40.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+
+# Polymarket
+requests>=2.31.0
+tenacity>=9.0.0
+
+# News
+newsapi-python>=0.2.7
+feedparser>=6.0.11
+
+# Database
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+
+# Scheduler
+apscheduler>=3.10.0
+
+# Dashboard
+streamlit>=1.40.0
+pandas>=2.0.0
+
+# Analysis
+numpy>=1.26.0
+
+# Testing
+pytest>=8.0.0
+pytest-mock>=3.14.0
