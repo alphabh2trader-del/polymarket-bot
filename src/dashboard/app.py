@@ -18,7 +18,7 @@ from config.settings import settings
 from src.analysis.ev_calculator import ev_explanation
 from src.analysis.kelly import kelly_explanation
 from src.database.db import get_session, init_db
-from src.database.models import Market, Opportunity, ScanRun, Trade
+from src.database.models import Market, Opportunity, Prediction, ScanRun, Trade
 from src.risk.risk_manager import RiskManager
 
 # ------------------------------------------------------------------ #
@@ -106,6 +106,31 @@ def load_scan_history(limit: int = 48) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=60)
+def load_predictions(limit: int = 100) -> pd.DataFrame:
+    with get_session() as session:
+        rows = (
+            session.query(Prediction)
+            .order_by(desc(Prediction.created_at))
+            .limit(limit)
+            .all()
+        )
+        if not rows:
+            return pd.DataFrame()
+        return pd.DataFrame([{
+            "Question": p.question[:80] + ("…" if len(p.question) > 80 else ""),
+            "Side": p.predicted_side,
+            "Estimated %": f"{p.predicted_prob:.1%}",
+            "Implied %": f"{p.implied_prob:.1%}",
+            "EV": f"{p.ev:.1%}",
+            "Confidence": p.confidence.title(),
+            "Outcome": p.outcome,
+            "Predicted": p.created_at.strftime("%Y-%m-%d") if p.created_at else "—",
+            "Resolved": p.resolved_at.strftime("%Y-%m-%d") if p.resolved_at else "—",
+            "_outcome": p.outcome,
+        } for p in rows])
+
+
+@st.cache_data(ttl=60)
 def load_trades() -> pd.DataFrame:
     with get_session() as session:
         trades = (
@@ -173,6 +198,41 @@ col1.metric("Account Equity", f"${status['account_equity']:,.2f}")
 col2.metric("Max Trade Size", f"${status['max_trade_size']:,.2f}")
 col3.metric("Daily Loss", f"${status['daily_loss']:.2f}", delta=f"/ ${status['daily_limit']:.2f} limit")
 col4.metric("Daily Utilization", f"{status['daily_utilization_pct']:.1f}%")
+
+st.divider()
+
+# ---- Prediction Win Rate ----
+st.subheader("🏆 Prediction Accuracy")
+df_preds = load_predictions()
+if df_preds.empty:
+    st.info("No predictions recorded yet — win rate will appear after the first scan finds opportunities.")
+else:
+    total_wins = int((df_preds["_outcome"] == "WIN").sum())
+    total_losses = int((df_preds["_outcome"] == "LOSS").sum())
+    total_pending = int((df_preds["_outcome"] == "PENDING").sum())
+    total_resolved = total_wins + total_losses
+    win_rate = total_wins / total_resolved if total_resolved > 0 else None
+
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("Win Rate", f"{win_rate:.1%}" if win_rate is not None else "—")
+    p2.metric("Wins", total_wins)
+    p3.metric("Losses", total_losses)
+    p4.metric("Pending", total_pending)
+
+    st.markdown("**Recent Predictions**")
+    display_cols = ["Question", "Side", "Estimated %", "Implied %", "EV", "Confidence", "Outcome", "Predicted", "Resolved"]
+
+    def _highlight_outcome(row):
+        if row["Outcome"] == "WIN":
+            return ["background-color: #1a3a1a"] * len(row)
+        if row["Outcome"] == "LOSS":
+            return ["background-color: #3a1a1a"] * len(row)
+        return [""] * len(row)
+
+    st.dataframe(
+        df_preds[display_cols].style.apply(_highlight_outcome, axis=1),
+        hide_index=True,
+    )
 
 st.divider()
 

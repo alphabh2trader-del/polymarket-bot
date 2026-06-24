@@ -1,13 +1,14 @@
 """
 Main market scanner — runs every 15 minutes, analyses all active markets,
-persists opportunities to the database.
+persists opportunities and predictions to the database, checks resolutions,
+and fires Telegram reports on schedule.
 """
 
 from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -19,9 +20,11 @@ from src.analysis.ev_calculator import EVResult, find_best_opportunity
 from src.analysis.kelly import position_size_usd
 from src.analysis.probability import ProbabilityEstimate, ProbabilityEstimator
 from src.database.db import get_session, init_db
-from src.database.models import Market, Opportunity, PriceHistory, ScanRun
+from src.database.models import Market, Opportunity, PriceHistory, Prediction, ScanRun
+from src.notifications.telegram import TelegramNotifier
 from src.risk.risk_manager import RiskManager
 from src.scanner.anomaly_detector import AnomalyDetector, AnomalySignal
+from src.scanner.resolution_checker import ResolutionChecker
 from src.utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -54,6 +57,14 @@ class MarketScanner:
             volume_spike_multiplier=settings.volume_spike_multiplier,
             price_move_threshold=settings.price_move_threshold,
         )
+        self.telegram = TelegramNotifier(
+            bot_token=settings.telegram_bot_token,
+            chat_id=settings.telegram_chat_id,
+        )
+        self.resolver = ResolutionChecker(
+            poly=self.poly,
+            notifier=self.telegram,
+        )
         self._scheduler = BlockingScheduler(timezone="UTC")
 
     # ------------------------------------------------------------------ #
@@ -61,10 +72,14 @@ class MarketScanner:
     # ------------------------------------------------------------------ #
 
     def start(self) -> None:
-        """Start the 15-minute scanning loop."""
+        """Start the scanning loop with all scheduled jobs."""
         log.info(f"Scanner starting — interval: {settings.scan_interval_minutes} minutes")
-        # Run immediately, then on schedule
+
+        # Run scan + resolution check immediately on startup
         self.run_scan()
+        self._run_resolution_check()
+
+        # Recurring scan every 15 min
         self._scheduler.add_job(
             self.run_scan,
             "interval",
@@ -72,16 +87,56 @@ class MarketScanner:
             id="market_scan",
             max_instances=1,
         )
+
+        # Resolution check every 15 min (offset by 5 min so it doesn't clash with scan)
+        self._scheduler.add_job(
+            self._run_resolution_check,
+            "interval",
+            minutes=settings.scan_interval_minutes,
+            start_date=datetime.now(timezone.utc) + timedelta(minutes=5),
+            id="resolution_check",
+            max_instances=1,
+        )
+
+        # Daily summary at 20:00 UTC
+        self._scheduler.add_job(
+            self._send_daily_report,
+            "cron",
+            hour=20,
+            minute=0,
+            id="daily_report",
+        )
+
+        # Weekly summary — Sunday at 20:00 UTC
+        self._scheduler.add_job(
+            self._send_weekly_report,
+            "cron",
+            day_of_week="sun",
+            hour=20,
+            minute=0,
+            id="weekly_report",
+        )
+
+        # Monthly summary — 1st of month at 20:00 UTC
+        self._scheduler.add_job(
+            self._send_monthly_report,
+            "cron",
+            day=1,
+            hour=20,
+            minute=0,
+            id="monthly_report",
+        )
+
         try:
             self._scheduler.start()
         except (KeyboardInterrupt, SystemExit):
-            log.info("Scanner stopped by user.")
+            log.info("Scanner stopped.")
 
     # ------------------------------------------------------------------ #
     # Main scan                                                            #
     # ------------------------------------------------------------------ #
 
-    def run_scan(self) -> ScanRun:
+    def run_scan(self) -> int:
         started_at = datetime.utcnow()
         log.info("=== Scan started ===")
 
@@ -94,7 +149,6 @@ class MarketScanner:
         markets = self.poly.get_all_active_markets()
         log.info(f"Fetched {len(markets)} markets from Polymarket")
 
-        # Filter by minimum volume
         eligible = [
             m for m in markets
             if m.volume_24h >= settings.min_volume_usd and m.active
@@ -117,7 +171,10 @@ class MarketScanner:
                         opportunities_found += 1
                 except Exception as exc:
                     import traceback
-                    log.error(f"Error analysing market {market.condition_id}: {exc}\n{traceback.format_exc()}")
+                    log.error(
+                        f"Error analysing market {market.condition_id}: "
+                        f"{exc}\n{traceback.format_exc()}"
+                    )
                     errors += 1
 
         duration = (datetime.utcnow() - started_at).total_seconds()
@@ -143,14 +200,8 @@ class MarketScanner:
     # ------------------------------------------------------------------ #
 
     def _analyse_market(self, market: MarketData, scan_run_id: int) -> Optional[int]:
-        """
-        Full analysis pipeline for one market.
-        Returns the Opportunity id if an opportunity is found, else None.
-        """
-        # --- Upsert market in DB ---
         db_market_id = self._upsert_market(market)
 
-        # --- Fetch & store price history ---
         history = []
         if market.tokens:
             token_id = market.tokens[0] if isinstance(market.tokens[0], str) else market.tokens[0].get("token_id", "")
@@ -158,7 +209,6 @@ class MarketScanner:
                 history = self.poly.get_price_history(token_id, interval="1h", fidelity=24)
                 self._store_price_history(db_market_id, history)
 
-        # --- Anomaly detection ---
         anomalies: list[AnomalySignal] = []
         if history:
             anomalies = self.anomaly.check_price_history(
@@ -167,19 +217,16 @@ class MarketScanner:
             for sig in anomalies:
                 log.info(f"ANOMALY [{sig.anomaly_type}] {market.question[:60]}: {sig.description}")
 
-        # --- News search ---
         query = self._extract_search_query(market.question)
         articles = self.news.search_news(query, days_back=7)
         news_text = NewsAggregator.format_for_prompt(articles)
 
-        # --- Resolution date string ---
         res_str = (
             market.resolution_date.strftime("%Y-%m-%d")
             if market.resolution_date
             else "Unknown"
         )
 
-        # --- Probability estimation ---
         estimate: ProbabilityEstimate = self.estimator.estimate(
             question=market.question,
             description=market.description,
@@ -194,7 +241,6 @@ class MarketScanner:
             f"conf={estimate.confidence}"
         )
 
-        # --- EV calculation ---
         ev_result: EVResult = find_best_opportunity(
             yes_price=market.yes_price,
             no_price=market.no_price,
@@ -205,7 +251,6 @@ class MarketScanner:
         if not ev_result.is_opportunity:
             return None
 
-        # --- Risk check ---
         kelly_size = position_size_usd(
             win_prob=ev_result.estimated_prob,
             price=ev_result.implied_prob,
@@ -226,7 +271,6 @@ class MarketScanner:
             log.debug(f"Risk rejected: {market.question[:60]} — {decision.reason}")
             return None
 
-        # --- Save opportunity ---
         opp_id = self._save_opportunity(
             db_market_id=db_market_id,
             scan_run_id=scan_run_id,
@@ -236,12 +280,93 @@ class MarketScanner:
             articles=articles,
         )
 
+        # Record prediction (deduped — only one PENDING prediction per market+side)
+        self._save_prediction(
+            db_market_id=db_market_id,
+            opportunity_id=opp_id,
+            condition_id=market.condition_id,
+            question=market.question,
+            ev_result=ev_result,
+            estimate=estimate,
+        )
+
         log.info(
             f"OPPORTUNITY: {market.question[:70]} | "
             f"{ev_result.side} EV={ev_result.ev:.1%} edge={ev_result.edge:+.1%} "
             f"size=${decision.adjusted_size_usd:.2f} conf={estimate.confidence}"
         )
         return opp_id
+
+    # ------------------------------------------------------------------ #
+    # Resolution checking                                                  #
+    # ------------------------------------------------------------------ #
+
+    def _run_resolution_check(self) -> None:
+        log.info("Checking pending predictions for resolution...")
+        try:
+            wins, losses = self.resolver.check_pending()
+            log.info(f"Resolution check done: {wins}W / {losses}L")
+        except Exception as exc:
+            log.error(f"Resolution check failed: {exc}")
+
+    # ------------------------------------------------------------------ #
+    # Scheduled Telegram reports                                           #
+    # ------------------------------------------------------------------ #
+
+    def _send_daily_report(self) -> None:
+        wins, losses, pending = self._get_prediction_stats()
+        win_rate = wins / (wins + losses) if (wins + losses) > 0 else None
+        self.telegram.send_daily_summary(wins=wins, losses=losses, pending=pending, win_rate=win_rate)
+        log.info(f"Daily report sent: {wins}W/{losses}L win_rate={win_rate}")
+
+    def _send_weekly_report(self) -> None:
+        wins, losses, pending = self._get_prediction_stats()
+        win_rate = wins / (wins + losses) if (wins + losses) > 0 else None
+        since = datetime.now(timezone.utc) - timedelta(days=7)
+        week_wins, week_losses = self._get_period_stats(since)
+        self.telegram.send_weekly_summary(
+            wins=wins, losses=losses, pending=pending, win_rate=win_rate,
+            week_wins=week_wins, week_losses=week_losses,
+        )
+        log.info(f"Weekly report sent: {week_wins}W/{week_losses}L this week")
+
+    def _send_monthly_report(self) -> None:
+        wins, losses, pending = self._get_prediction_stats()
+        win_rate = wins / (wins + losses) if (wins + losses) > 0 else None
+        since = datetime.now(timezone.utc) - timedelta(days=30)
+        month_wins, month_losses = self._get_period_stats(since)
+        self.telegram.send_monthly_summary(
+            wins=wins, losses=losses, pending=pending, win_rate=win_rate,
+            month_wins=month_wins, month_losses=month_losses,
+        )
+        log.info(f"Monthly report sent: {month_wins}W/{month_losses}L this month")
+
+    def _get_prediction_stats(self) -> tuple[int, int, int]:
+        """Returns (total_wins, total_losses, total_pending)."""
+        with get_session() as session:
+            from sqlalchemy import func
+            rows = (
+                session.query(Prediction.outcome, func.count(Prediction.id))
+                .group_by(Prediction.outcome)
+                .all()
+            )
+        counts = {r[0]: r[1] for r in rows}
+        return counts.get("WIN", 0), counts.get("LOSS", 0), counts.get("PENDING", 0)
+
+    def _get_period_stats(self, since: datetime) -> tuple[int, int]:
+        """Returns (wins, losses) for predictions resolved after `since`."""
+        since_naive = since.replace(tzinfo=None)
+        with get_session() as session:
+            from sqlalchemy import func
+            rows = (
+                session.query(Prediction.outcome, func.count(Prediction.id))
+                .filter(Prediction.resolved_at >= since_naive)
+                .filter(Prediction.outcome.in_(["WIN", "LOSS"]))
+                .group_by(Prediction.outcome)
+                .all()
+            )
+        counts = {r[0]: r[1] for r in rows}
+        return counts.get("WIN", 0), counts.get("LOSS", 0)
 
     # ------------------------------------------------------------------ #
     # Database helpers                                                     #
@@ -274,7 +399,7 @@ class MarketScanner:
         if not history:
             return
         with get_session() as session:
-            for point in history[-6:]:  # store last 6 points only to avoid bloat
+            for point in history[-6:]:
                 session.add(PriceHistory(
                     market_id=market_id,
                     timestamp=point.timestamp,
@@ -324,8 +449,46 @@ class MarketScanner:
             session.flush()
             return opp.id
 
+    def _save_prediction(
+        self,
+        db_market_id: int,
+        opportunity_id: int,
+        condition_id: str,
+        question: str,
+        ev_result: EVResult,
+        estimate: ProbabilityEstimate,
+    ) -> Optional[int]:
+        """Save a prediction record (deduped by condition_id + predicted_side while PENDING)."""
+        with get_session() as session:
+            existing = (
+                session.query(Prediction)
+                .filter_by(
+                    condition_id=condition_id,
+                    predicted_side=ev_result.side,
+                    outcome="PENDING",
+                )
+                .first()
+            )
+            if existing:
+                return existing.id
+
+            pred = Prediction(
+                market_id=db_market_id,
+                opportunity_id=opportunity_id,
+                condition_id=condition_id,
+                question=question,
+                predicted_side=ev_result.side,
+                predicted_prob=ev_result.estimated_prob,
+                implied_prob=ev_result.implied_prob,
+                ev=ev_result.ev,
+                confidence=estimate.confidence,
+            )
+            session.add(pred)
+            session.flush()
+            log.info(f"PREDICTION saved: {ev_result.side} on {question[:60]}")
+            return pred.id
+
     @staticmethod
     def _extract_search_query(question: str) -> str:
-        """Trim the question for a news search query (first 80 chars, no question mark)."""
         q = question.replace("?", "").strip()
         return q[:80] if len(q) > 80 else q

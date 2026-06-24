@@ -28,6 +28,7 @@ class Market(Base):
     opportunities = relationship("Opportunity", back_populates="market", cascade="all, delete-orphan")
     trades = relationship("Trade", back_populates="market", cascade="all, delete-orphan")
     price_history = relationship("PriceHistory", back_populates="market", cascade="all, delete-orphan")
+    predictions = relationship("Prediction", back_populates="market", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Market {self.condition_id[:8]}… YES={self.yes_price:.2f}>"
@@ -54,6 +55,8 @@ class Opportunity(Base):
 
     market = relationship("Market", back_populates="opportunities")
     scan_run = relationship("ScanRun", back_populates="opportunities")
+
+    prediction = relationship("Prediction", back_populates="opportunity", uselist=False)
 
     def __repr__(self) -> str:
         return f"<Opportunity market={self.market_id} side={self.recommended_side} EV={self.ev:.3f}>"
@@ -94,6 +97,32 @@ class ScanRun(Base):
 
     def __repr__(self) -> str:
         return f"<ScanRun id={self.id} markets={self.markets_scanned} ops={self.opportunities_found}>"
+
+
+class Prediction(Base):
+    """One prediction per unique (condition_id, predicted_side). Tracks WIN/LOSS vs market outcome."""
+    __tablename__ = "predictions"
+
+    id = Column(Integer, primary_key=True)
+    market_id = Column(Integer, ForeignKey("markets.id"), nullable=False, index=True)
+    opportunity_id = Column(Integer, ForeignKey("opportunities.id"), nullable=True)
+    condition_id = Column(String, nullable=False, index=True)
+    question = Column(Text, nullable=False)
+    predicted_side = Column(String, nullable=False)   # YES / NO
+    predicted_prob = Column(Float, nullable=False)    # our Claude estimate
+    implied_prob = Column(Float, nullable=False)      # market price at prediction time
+    ev = Column(Float, nullable=False)
+    confidence = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    resolved_at = Column(DateTime, nullable=True)
+    outcome = Column(String, default="PENDING")       # PENDING / WIN / LOSS
+    resolution_value = Column(String, nullable=True)  # YES / NO as returned by Polymarket
+
+    market = relationship("Market", back_populates="predictions")
+    opportunity = relationship("Opportunity", back_populates="prediction")
+
+    def __repr__(self) -> str:
+        return f"<Prediction {self.predicted_side} [{self.outcome}] EV={self.ev:.2f}>"
 
 
 class PriceHistory(Base):

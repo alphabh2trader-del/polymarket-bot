@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     volume_spike_multiplier: float = 3.0   # 3× average = spike
     price_move_threshold: float = 0.10     # 10% price move = anomaly
 
+    # --- Telegram ---
+    telegram_bot_token: str = Field(default="", description="Telegram Bot API token from @BotFather")
+    telegram_chat_id: str = Field(default="", description="Telegram chat ID to receive notifications")
+
     # --- Dashboard ---
     dashboard_port: int = 8501
     top_opportunities: int = 10
