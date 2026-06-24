@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     # --- LLM ---
     anthropic_api_key: str = Field(default="", description="Anthropic Claude API key")
-    anthropic_model: str = "claude-sonnet-4-6"
+    anthropic_model: str = "claude-haiku-4-5-20251001"
 
     # --- Database ---
     # Railway provides DATABASE_URL with postgres:// prefix; SQLAlchemy needs postgresql://
@@ -46,9 +46,10 @@ class Settings(BaseSettings):
     min_liquidity_usd: float = 10_000.0    # Min 24h volume
 
     # --- Scanner ---
-    scan_interval_minutes: int = 15
+    scan_interval_minutes: int = 60
+    max_markets_per_scan: int = 30
     min_ev_threshold: float = 0.05         # 5% minimum EV
-    min_volume_usd: float = 5_000.0        # Min market volume to consider
+    min_volume_usd: float = 25_000.0       # Min market volume to consider
     min_hours_to_resolution: int = 48      # Skip markets resolving too soon
 
     # --- Anomaly Detection ---

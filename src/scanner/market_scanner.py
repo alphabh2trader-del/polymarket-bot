@@ -152,11 +152,12 @@ class MarketScanner:
         markets = self.poly.get_all_active_markets()
         log.info(f"Fetched {len(markets)} markets from Polymarket")
 
-        eligible = [
-            m for m in markets
-            if m.volume_24h >= settings.min_volume_usd and m.active
-        ]
-        log.info(f"{len(eligible)} markets pass minimum volume filter")
+        eligible = sorted(
+            [m for m in markets if m.volume_24h >= settings.min_volume_usd and m.active],
+            key=lambda m: m.volume_24h,
+            reverse=True,
+        )[:settings.max_markets_per_scan]
+        log.info(f"{len(eligible)} markets selected (top by volume, min ${settings.min_volume_usd:,.0f})")
 
         opportunities_found = 0
         errors = 0
