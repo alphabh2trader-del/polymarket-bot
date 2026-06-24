@@ -75,6 +75,9 @@ class MarketScanner:
         """Start the scanning loop with all scheduled jobs."""
         log.info(f"Scanner starting — interval: {settings.scan_interval_minutes} minutes")
 
+        # Backfill predictions from any opportunities saved before prediction tracking existed
+        self._backfill_predictions()
+
         # Run scan + resolution check immediately on startup
         self.run_scan()
         self._run_resolution_check()
@@ -296,6 +299,56 @@ class MarketScanner:
             f"size=${decision.adjusted_size_usd:.2f} conf={estimate.confidence}"
         )
         return opp_id
+
+    # ------------------------------------------------------------------ #
+    # Backfill                                                             #
+    # ------------------------------------------------------------------ #
+
+    def _backfill_predictions(self) -> None:
+        """Create Prediction records for any Opportunities that don't have one yet."""
+        try:
+            with get_session() as session:
+                existing_opp_ids = {
+                    p.opportunity_id
+                    for p in session.query(Prediction.opportunity_id).all()
+                    if p.opportunity_id is not None
+                }
+                opps = (
+                    session.query(Opportunity, Market)
+                    .join(Market, Opportunity.market_id == Market.id)
+                    .filter(Opportunity.id.notin_(existing_opp_ids) if existing_opp_ids else True)
+                    .all()
+                )
+                count = 0
+                for opp, mkt in opps:
+                    already = (
+                        session.query(Prediction)
+                        .filter_by(
+                            condition_id=mkt.condition_id,
+                            predicted_side=opp.recommended_side,
+                            outcome="PENDING",
+                        )
+                        .first()
+                    )
+                    if already:
+                        continue
+                    session.add(Prediction(
+                        market_id=mkt.id,
+                        opportunity_id=opp.id,
+                        condition_id=mkt.condition_id,
+                        question=mkt.question,
+                        predicted_side=opp.recommended_side,
+                        predicted_prob=opp.estimated_prob,
+                        implied_prob=opp.implied_prob,
+                        ev=opp.ev,
+                        confidence=opp.confidence,
+                        created_at=opp.created_at,
+                    ))
+                    count += 1
+                if count:
+                    log.info(f"Backfilled {count} predictions from existing opportunities")
+        except Exception as exc:
+            log.error(f"Backfill failed: {exc}")
 
     # ------------------------------------------------------------------ #
     # Resolution checking                                                  #
