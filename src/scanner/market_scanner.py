@@ -158,7 +158,7 @@ class MarketScanner:
         opportunities_found = 0
         errors = 0
 
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {
                 executor.submit(self._analyse_market, m, scan_run_id): m
                 for m in eligible

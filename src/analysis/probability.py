@@ -8,6 +8,7 @@ probability estimate with reasoning. Returns a structured ProbabilityEstimate.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 
 import anthropic
@@ -91,21 +92,30 @@ class ProbabilityEstimator:
             news_text=news_text or "No recent news found.",
         )
 
-        try:
-            message = self.client.messages.create(
-                model=self.model,
-                max_tokens=800,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = message.content[0].text.strip()
-            return self._parse_response(raw)
-        except anthropic.APIError as exc:
-            log.error(f"Claude API error during probability estimation: {exc}")
-            return self._fallback_estimate(yes_price)
-        except Exception as exc:
-            log.error(f"Unexpected error in probability estimation: {exc}")
-            return self._fallback_estimate(yes_price)
+        for attempt in range(3):
+            try:
+                message = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=800,
+                    system=SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": prompt}],
+                    timeout=30.0,
+                )
+                raw = message.content[0].text.strip()
+                return self._parse_response(raw)
+            except anthropic.RateLimitError:
+                wait = 20 * (attempt + 1)
+                log.warning(f"Claude rate limited — waiting {wait}s (attempt {attempt+1}/3)")
+                time.sleep(wait)
+            except anthropic.APIError as exc:
+                log.error(f"Claude API error (attempt {attempt+1}/3): {exc}")
+                if attempt < 2:
+                    time.sleep(5)
+            except Exception as exc:
+                log.error(f"Unexpected error in probability estimation: {exc}")
+                if attempt < 2:
+                    time.sleep(5)
+        return self._fallback_estimate(yes_price)
 
     def _parse_response(self, raw: str) -> ProbabilityEstimate:
         # Strip markdown code fences if present
