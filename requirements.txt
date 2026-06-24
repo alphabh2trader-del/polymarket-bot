@@ -21,6 +21,7 @@ apscheduler>=3.10.0
 # Dashboard
 streamlit>=1.40.0
 pandas>=2.0.0
+plotly>=5.20.0
 
 # Analysis
 numpy>=1.26.0

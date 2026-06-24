@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 from sqlalchemy import desc
 
@@ -204,21 +205,74 @@ st.divider()
 # ---- Prediction Win Rate ----
 st.subheader("🏆 Prediction Accuracy")
 df_preds = load_predictions()
-if df_preds.empty:
-    st.info("No predictions recorded yet — win rate will appear after the first scan finds opportunities.")
-else:
-    total_wins = int((df_preds["_outcome"] == "WIN").sum())
-    total_losses = int((df_preds["_outcome"] == "LOSS").sum())
-    total_pending = int((df_preds["_outcome"] == "PENDING").sum())
-    total_resolved = total_wins + total_losses
-    win_rate = total_wins / total_resolved if total_resolved > 0 else None
 
-    p1, p2, p3, p4 = st.columns(4)
-    p1.metric("Win Rate", f"{win_rate:.1%}" if win_rate is not None else "—")
-    p2.metric("Wins", total_wins)
-    p3.metric("Losses", total_losses)
-    p4.metric("Pending", total_pending)
+df_preds_all = load_predictions(limit=500)
+total_wins = int((df_preds_all["_outcome"] == "WIN").sum()) if not df_preds_all.empty else 0
+total_losses = int((df_preds_all["_outcome"] == "LOSS").sum()) if not df_preds_all.empty else 0
+total_pending = int((df_preds_all["_outcome"] == "PENDING").sum()) if not df_preds_all.empty else 0
+total_resolved = total_wins + total_losses
+win_rate = total_wins / total_resolved if total_resolved > 0 else None
 
+chart_col, stats_col = st.columns([1, 1])
+
+with chart_col:
+    if total_resolved == 0:
+        fig = go.Figure(go.Pie(
+            values=[1],
+            labels=["Awaiting predictions"],
+            hole=0.65,
+            marker_colors=["#2d2d2d"],
+            textinfo="none",
+            hoverinfo="skip",
+        ))
+        center_text = "—<br><span style='font-size:14px'>No data yet</span>"
+    else:
+        fig = go.Figure(go.Pie(
+            values=[total_wins, total_losses],
+            labels=["Wins", "Losses"],
+            hole=0.65,
+            marker_colors=["#00c471", "#ff4444"],
+            textinfo="percent",
+            textfont=dict(size=15, color="white"),
+            hovertemplate="%{label}: %{value} (%{percent})<extra></extra>",
+            sort=False,
+        ))
+        center_text = f"<b>{win_rate:.1%}</b><br><span style='font-size:13px'>Win Rate</span>"
+
+    fig.update_layout(
+        annotations=[dict(
+            text=center_text,
+            x=0.5, y=0.5,
+            font=dict(size=22, color="white"),
+            showarrow=False,
+            xanchor="center",
+            yanchor="middle",
+        )],
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            y=-0.08,
+            x=0.5,
+            xanchor="center",
+            font=dict(color="white", size=13),
+        ),
+        margin=dict(t=10, b=30, l=10, r=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        height=280,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+with stats_col:
+    st.markdown("### Results")
+    st.metric("Win Rate", f"{win_rate:.1%}" if win_rate is not None else "—")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Wins", total_wins)
+    m2.metric("Losses", total_losses)
+    m3.metric("Pending", total_pending)
+    st.caption(f"Total resolved: {total_resolved}")
+
+if not df_preds.empty:
     st.markdown("**Recent Predictions**")
     display_cols = ["Question", "Side", "Estimated %", "Implied %", "EV", "Confidence", "Outcome", "Predicted", "Resolved"]
 
@@ -233,6 +287,8 @@ else:
         df_preds[display_cols].style.apply(_highlight_outcome, axis=1),
         hide_index=True,
     )
+else:
+    st.info("No predictions recorded yet — win rate will appear after the first scan finds opportunities.")
 
 st.divider()
 
