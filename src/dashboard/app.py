@@ -246,8 +246,5 @@ elif page == "❌  Losses":
 # ------------------------------------------------------------------ #
 
 import time as _time
-_time.sleep(0)
-st.markdown(
-    "<script>setTimeout(function(){window.location.reload()}, 30000);</script>",
-    unsafe_allow_html=True,
-)
+_time.sleep(30)
+st.rerun()
