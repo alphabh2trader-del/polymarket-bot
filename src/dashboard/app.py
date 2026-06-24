@@ -47,18 +47,18 @@ def load_predictions(outcome: str | None = None, limit: int = 1000) -> pd.DataFr
         if outcome:
             q = q.filter(Prediction.outcome == outcome)
         rows = q.limit(limit).all()
-    if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame([{
-        "Time": p.created_at.strftime("%Y-%m-%d %H:%M") if p.created_at else "—",
-        "Market": p.question,
-        "Side": p.predicted_side,
-        "EV": f"{p.ev:.1%}",
-        "Confidence": p.confidence.title(),
-        "Outcome": p.outcome,
-        "Resolved": p.resolved_at.strftime("%Y-%m-%d") if p.resolved_at else "—",
-        "_question": p.question,
-    } for p in rows])
+        if not rows:
+            return pd.DataFrame()
+        return pd.DataFrame([{
+            "Time": p.created_at.strftime("%Y-%m-%d %H:%M") if p.created_at else "—",
+            "Market": p.question,
+            "Side": p.predicted_side,
+            "EV": f"{p.ev:.1%}",
+            "Confidence": p.confidence.title(),
+            "Outcome": p.outcome,
+            "Resolved": p.resolved_at.strftime("%Y-%m-%d") if p.resolved_at else "—",
+            "_question": p.question,
+        } for p in rows])
 
 
 @st.cache_data(ttl=30)
@@ -70,7 +70,7 @@ def get_stats() -> tuple[int, int, int]:
             .group_by(Prediction.outcome)
             .all()
         )
-    counts = {r[0]: r[1] for r in rows}
+        counts = {r[0]: r[1] for r in rows}
     return counts.get("WIN", 0), counts.get("LOSS", 0), counts.get("PENDING", 0)
 
 
