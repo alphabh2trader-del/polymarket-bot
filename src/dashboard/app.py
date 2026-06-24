@@ -21,7 +21,7 @@ from sqlalchemy import desc
 
 from config.settings import settings
 from src.database.db import get_session, init_db
-from src.database.models import Prediction
+from src.database.models import Prediction, ScanRun
 
 # ------------------------------------------------------------------ #
 # Page config                                                          #
@@ -62,6 +62,25 @@ def load_predictions(outcome: str | None = None, limit: int = 1000) -> pd.DataFr
 
 
 @st.cache_data(ttl=30)
+def get_last_scan() -> dict | None:
+    with get_session() as session:
+        run = (
+            session.query(ScanRun)
+            .filter(ScanRun.completed_at.isnot(None))
+            .order_by(desc(ScanRun.completed_at))
+            .first()
+        )
+        if not run:
+            return None
+        return {
+            "completed_at": run.completed_at.strftime("%Y-%m-%d %H:%M UTC") if run.completed_at else "—",
+            "markets_scanned": run.markets_scanned,
+            "opportunities_found": run.opportunities_found,
+            "errors": run.errors or 0,
+        }
+
+
+@st.cache_data(ttl=30)
 def get_stats() -> tuple[int, int, int]:
     with get_session() as session:
         from sqlalchemy import func
@@ -90,7 +109,17 @@ with st.sidebar:
     if st.button("🔄 Refresh"):
         st.cache_data.clear()
         st.rerun()
-    st.caption(f"Model: {settings.anthropic_model}")
+    st.divider()
+    last = get_last_scan()
+    if last:
+        st.caption("**Last scan**")
+        st.caption(last["completed_at"])
+        st.caption(f"Markets: {last['markets_scanned']}  |  Opps: {last['opportunities_found']}")
+        if last["errors"]:
+            st.caption(f"⚠️ Errors: {last['errors']}")
+    else:
+        st.caption("No scan recorded yet")
+    st.divider()
     st.caption(f"Scan every {settings.scan_interval_minutes} min")
 
 # ------------------------------------------------------------------ #
