@@ -130,6 +130,9 @@ class MarketScanner:
             id="monthly_report",
         )
 
+        # Two-way Telegram command listener
+        self.telegram.start_polling(self._handle_telegram_command)
+
         try:
             self._scheduler.start()
         except (KeyboardInterrupt, SystemExit):
@@ -394,6 +397,86 @@ class MarketScanner:
             month_wins=month_wins, month_losses=month_losses,
         )
         log.info(f"Monthly report sent: {month_wins}W/{month_losses}L this month")
+
+    # ------------------------------------------------------------------ #
+    # Telegram command handler                                            #
+    # ------------------------------------------------------------------ #
+
+    def _handle_telegram_command(self, command: str, chat_id: str) -> None:
+        """Respond to commands sent by the user via Telegram."""
+        if command == "/ping":
+            self.telegram._send("Pong! Bot is alive and scanning.", chat_id)
+
+        elif command in ("/status", "/stats"):
+            wins, losses, pending = self._get_prediction_stats()
+            total = wins + losses
+            rate_str = f"{wins/total:.1%}" if total else "N/A"
+            self.telegram._send(
+                f"<b>Bot Status</b>\n\n"
+                f"Win Rate: <b>{rate_str}</b>\n"
+                f"Wins: {wins}  |  Losses: {losses}  |  Pending: {pending}\n\n"
+                f"Next scan: every {settings.scan_interval_minutes} min",
+                chat_id,
+            )
+
+        elif command in ("/top", "/opportunities"):
+            with get_session() as session:
+                from src.database.models import Opportunity
+                from sqlalchemy import desc as _desc
+                rows = (
+                    session.query(Opportunity, Market)
+                    .join(Market, Opportunity.market_id == Market.id)
+                    .order_by(_desc(Opportunity.ev))
+                    .limit(5)
+                    .all()
+                )
+                if not rows:
+                    self.telegram._send("No opportunities recorded yet.", chat_id)
+                    return
+                lines = ["<b>Top 5 Opportunities (by EV)</b>\n"]
+                for opp, mkt in rows:
+                    lines.append(
+                        f"• <b>{opp.recommended_side}</b> {mkt.question[:70]}\n"
+                        f"  EV {opp.ev:.1%} | edge {opp.edge:+.1%} | {opp.confidence}"
+                    )
+                self.telegram._send("\n".join(lines), chat_id)
+
+        elif command == "/pending":
+            with get_session() as session:
+                rows = (
+                    session.query(Prediction)
+                    .filter_by(outcome="PENDING")
+                    .order_by(Prediction.created_at.desc())
+                    .limit(10)
+                    .all()
+                )
+                if not rows:
+                    self.telegram._send("No pending predictions.", chat_id)
+                    return
+                lines = [f"<b>Pending Predictions ({len(rows)} shown)</b>\n"]
+                for p in rows:
+                    lines.append(
+                        f"• <b>{p.predicted_side}</b> {p.question[:70]}\n"
+                        f"  EV {p.ev:.1%} | {p.confidence}"
+                    )
+                self.telegram._send("\n".join(lines), chat_id)
+
+        elif command == "/help":
+            self.telegram._send(
+                "<b>Available Commands</b>\n\n"
+                "/status — win rate &amp; all-time stats\n"
+                "/top — top 5 opportunities by EV\n"
+                "/pending — current open predictions\n"
+                "/ping — check bot is alive\n"
+                "/help — this message",
+                chat_id,
+            )
+
+        else:
+            self.telegram._send(
+                f"Unknown command: {command}\nType /help to see what I support.",
+                chat_id,
+            )
 
     def _get_prediction_stats(self) -> tuple[int, int, int]:
         """Returns (total_wins, total_losses, total_pending)."""
