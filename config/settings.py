@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     max_markets_per_scan: int = 30
     min_ev_threshold: float = 0.05         # 5% minimum EV
     min_volume_usd: float = 25_000.0       # Min market volume to consider
+    min_implied_prob: float = 0.10         # Skip markets priced below 10% or above 90%
     min_hours_to_resolution: int = 48      # Skip markets resolving too soon
 
     # --- Anomaly Detection ---

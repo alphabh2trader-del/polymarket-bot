@@ -156,7 +156,12 @@ class MarketScanner:
         log.info(f"Fetched {len(markets)} markets from Polymarket")
 
         eligible = sorted(
-            [m for m in markets if m.volume_24h >= settings.min_volume_usd and m.active],
+            [
+                m for m in markets
+                if m.volume_24h >= settings.min_volume_usd
+                and m.active
+                and settings.min_implied_prob <= m.yes_price <= (1 - settings.min_implied_prob)
+            ],
             key=lambda m: m.volume_24h,
             reverse=True,
         )[:settings.max_markets_per_scan]
