@@ -85,17 +85,58 @@ class ResolutionChecker:
         return wins, losses
 
     def _resolve(self, condition_id: str) -> str | None:
-        """Returns 'YES', 'NO', or None if the market has not yet resolved."""
+        """
+        Returns 'YES', 'NO', or None if the market has not yet resolved.
+
+        Polymarket Gamma API: query /markets?condition_ids=<cid> (the
+        /markets/<id> path needs the numeric id, not the condition id).
+        A market is resolved when closed == True and umaResolutionStatus
+        == 'resolved'. The winner is read from outcomePrices: a JSON string
+        like '["1", "0"]' where index 0 is the YES outcome — the side priced
+        at 1 is the winner.
+        """
+        import json as _json
         try:
-            data = self.poly._get_gamma(f"/markets/{condition_id}")
-            if not data.get("resolved", False):
+            # closed=true: the API excludes closed markets by default, and we
+            # only care about markets that have already closed (resolved).
+            data = self.poly._get_gamma(
+                "/markets",
+                params={"condition_ids": condition_id, "closed": "true"},
+            )
+            if not data:
                 return None
-            raw = str(data.get("resolutionValue", "")).upper().strip()
-            if raw in ("YES", "1", "TRUE"):
+            market = data[0] if isinstance(data, list) else data
+            if not market:
+                return None
+
+            closed = bool(market.get("closed", False))
+            uma = str(market.get("umaResolutionStatus", "")).lower()
+            if not closed or uma != "resolved":
+                return None
+
+            raw_prices = market.get("outcomePrices", "")
+            if isinstance(raw_prices, str):
+                try:
+                    prices = _json.loads(raw_prices)
+                except ValueError:
+                    return None
+            elif isinstance(raw_prices, list):
+                prices = raw_prices
+            else:
+                return None
+
+            if len(prices) < 2:
+                return None
+
+            yes_price = float(prices[0])
+            no_price = float(prices[1])
+            if yes_price >= 0.99:
                 return "YES"
-            if raw in ("NO", "0", "FALSE"):
+            if no_price >= 0.99:
                 return "NO"
-            log.warning(f"Unrecognised resolutionValue '{raw}' for {condition_id}")
+            log.warning(
+                f"Resolved market {condition_id} has ambiguous prices {prices}"
+            )
             return None
         except Exception as exc:
             log.debug(f"Cannot check resolution for {condition_id}: {exc}")

@@ -75,6 +75,9 @@ class MarketScanner:
         """Start the scanning loop with all scheduled jobs."""
         log.info(f"Scanner starting — interval: {settings.scan_interval_minutes} minutes")
 
+        # Remove low-quality predictions saved before the quality filters existed
+        self._purge_low_quality_predictions()
+
         # Backfill predictions from any opportunities saved before prediction tracking existed
         self._backfill_predictions()
 
@@ -263,6 +266,24 @@ class MarketScanner:
         if not ev_result.is_opportunity:
             return None
 
+        # Win-rate guard: only bet sides we expect to win more often than not.
+        # A positive-EV long shot still loses most of the time and tanks win rate.
+        if ev_result.estimated_prob < settings.min_win_probability:
+            log.debug(
+                f"Skipped (win prob {ev_result.estimated_prob:.0%} < "
+                f"{settings.min_win_probability:.0%}): {market.question[:50]}"
+            )
+            return None
+
+        # Plausibility guard: a disagreement larger than max_edge usually means
+        # our estimate is wrong, not the market. Skip it.
+        if ev_result.edge > settings.max_edge:
+            log.debug(
+                f"Skipped (edge {ev_result.edge:.0%} > {settings.max_edge:.0%} "
+                f"implausible): {market.question[:50]}"
+            )
+            return None
+
         kelly_size = position_size_usd(
             win_prob=ev_result.estimated_prob,
             price=ev_result.implied_prob,
@@ -310,6 +331,46 @@ class MarketScanner:
         return opp_id
 
     # ------------------------------------------------------------------ #
+    # Prediction quality                                                   #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _is_quality_prediction(estimated_prob: float, implied_prob: float) -> bool:
+        """
+        A prediction is worth tracking only if it clears the same bar the live
+        scanner now enforces:
+          - the market is priced within [min_implied_prob, 1 - min_implied_prob]
+          - we expect the chosen side to win at least min_win_probability
+          - our disagreement with the market is not implausibly large
+        estimated_prob/implied_prob are stored from the chosen side's view.
+        """
+        lo = settings.min_implied_prob
+        if not (lo <= implied_prob <= 1 - lo):
+            return False
+        if estimated_prob < settings.min_win_probability:
+            return False
+        if (estimated_prob - implied_prob) > settings.max_edge:
+            return False
+        return True
+
+    def _purge_low_quality_predictions(self) -> int:
+        """Delete PENDING predictions that don't meet the current quality bar."""
+        try:
+            with get_session() as session:
+                rows = session.query(Prediction).filter_by(outcome="PENDING").all()
+                removed = 0
+                for p in rows:
+                    if not self._is_quality_prediction(p.predicted_prob, p.implied_prob):
+                        session.delete(p)
+                        removed += 1
+                if removed:
+                    log.info(f"Purged {removed} low-quality pending predictions")
+                return removed
+        except Exception as exc:
+            log.error(f"Purge failed: {exc}")
+            return 0
+
+    # ------------------------------------------------------------------ #
     # Backfill                                                             #
     # ------------------------------------------------------------------ #
 
@@ -340,6 +401,8 @@ class MarketScanner:
                         .first()
                     )
                     if already:
+                        continue
+                    if not self._is_quality_prediction(opp.estimated_prob, opp.implied_prob):
                         continue
                     session.add(Prediction(
                         market_id=mkt.id,
