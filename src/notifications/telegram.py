@@ -23,6 +23,7 @@ from src.utils.logger import get_logger
 log = get_logger(__name__)
 
 _API_BASE = "https://api.telegram.org/bot{token}"
+_DASHBOARD_URL = "https://polymarket-bot-production-f7e4.up.railway.app"
 
 
 class TelegramNotifier:
@@ -81,6 +82,49 @@ class TelegramNotifier:
             f"<i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>"
         )
         return self._send(text)
+
+    # ------------------------------------------------------------------ #
+    # Per-scan notification                                                #
+    # ------------------------------------------------------------------ #
+
+    def send_scan_complete(
+        self,
+        markets_scanned: int,
+        opportunities: list[dict],
+    ) -> bool:
+        """
+        Notify after each scan. Each opportunity dict has:
+          question, side, edge (fraction), ev (fraction), size (usd)
+        EV is the expected return — on $100 you'd expect to make ev*$100.
+        """
+        when = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+        if not opportunities:
+            text = (
+                f"🔔 <b>Scan complete</b> — {when}\n\n"
+                f"Analysed {markets_scanned} markets. No new edges this hour.\n\n"
+                f"Dashboard: {_DASHBOARD_URL}"
+            )
+            return self._send(text)
+
+        ranked = sorted(opportunities, key=lambda o: o.get("ev", 0), reverse=True)[:5]
+        lines = [
+            f"🔔 <b>Scan complete</b> — {when}",
+            f"Found <b>{len(opportunities)}</b> edge(s) across {markets_scanned} markets.",
+            "",
+            "👉 <b>Open the dashboard to review:</b>",
+            _DASHBOARD_URL,
+            "",
+        ]
+        for i, o in enumerate(ranked, 1):
+            edge = o.get("edge", 0)
+            ev = o.get("ev", 0)
+            profit_100 = ev * 100
+            lines.append(
+                f"{i}. <b>{o.get('side','')}</b> — {o.get('question','')[:65]}\n"
+                f"   Edge {edge:+.0%} | Return on $100: <b>+${profit_100:.0f} ({ev:+.0%})</b>"
+            )
+        return self._send("\n".join(lines))
 
     # ------------------------------------------------------------------ #
     # Periodic summaries                                                   #

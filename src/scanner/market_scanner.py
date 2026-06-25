@@ -186,6 +186,7 @@ class MarketScanner:
 
         opportunities_found = 0
         errors = 0
+        found: list[dict] = []
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {
@@ -198,6 +199,7 @@ class MarketScanner:
                     opp = future.result()
                     if opp:
                         opportunities_found += 1
+                        found.append(opp)
                 except Exception as exc:
                     import traceback
                     log.error(
@@ -205,6 +207,15 @@ class MarketScanner:
                         f"{exc}\n{traceback.format_exc()}"
                     )
                     errors += 1
+
+        # Notify on Telegram that the scan ran, with edges + expected return
+        try:
+            self.telegram.send_scan_complete(
+                markets_scanned=len(eligible),
+                opportunities=found,
+            )
+        except Exception as exc:
+            log.error(f"Scan notification failed: {exc}")
 
         duration = (datetime.utcnow() - started_at).total_seconds()
 
@@ -228,7 +239,7 @@ class MarketScanner:
     # Per-market analysis                                                  #
     # ------------------------------------------------------------------ #
 
-    def _analyse_market(self, market: MarketData, scan_run_id: int) -> Optional[int]:
+    def _analyse_market(self, market: MarketData, scan_run_id: int) -> Optional[dict]:
         db_market_id = self._upsert_market(market)
 
         history = []
@@ -342,7 +353,13 @@ class MarketScanner:
             f"{ev_result.side} EV={ev_result.ev:.1%} edge={ev_result.edge:+.1%} "
             f"size=${decision.adjusted_size_usd:.2f} conf={estimate.confidence}"
         )
-        return opp_id
+        return {
+            "question": market.question,
+            "side": ev_result.side,
+            "edge": ev_result.edge,
+            "ev": ev_result.ev,
+            "size": decision.adjusted_size_usd,
+        }
 
     # ------------------------------------------------------------------ #
     # Prediction quality                                                   #

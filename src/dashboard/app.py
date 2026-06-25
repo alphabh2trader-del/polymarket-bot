@@ -53,7 +53,9 @@ def load_predictions(outcome: str | None = None, limit: int = 1000) -> pd.DataFr
             "Time": p.created_at.strftime("%Y-%m-%d %H:%M") if p.created_at else "—",
             "Market": p.question,
             "Side": p.predicted_side,
-            "EV": f"{p.ev:.1%}",
+            "Edge": f"{(p.predicted_prob - p.implied_prob):+.0%}" if p.predicted_prob is not None and p.implied_prob is not None else "—",
+            "Return %": f"{p.ev:+.0%}" if p.ev is not None else "—",
+            "Profit/$100": f"+${p.ev * 100:.0f}" if p.ev is not None else "—",
             "Confidence": p.confidence.title(),
             "Outcome": p.outcome,
             "Resolved": p.resolved_at.strftime("%Y-%m-%d") if p.resolved_at else "—",
@@ -211,7 +213,7 @@ if page == "🏠  Home":
     if df_all.empty:
         st.info("No predictions yet — the bot will start recording positions on its first scan.")
     else:
-        display_cols = ["Time", "Market", "Side", "EV", "Confidence", "Outcome", "Resolved"]
+        display_cols = ["Time", "Market", "Side", "Edge", "Return %", "Profit/$100", "Confidence", "Outcome", "Resolved"]
         st.dataframe(
             _style_feed(df_all[display_cols]),
             hide_index=True,
@@ -237,7 +239,7 @@ elif page == "✅  Wins":
     else:
         if search.strip():
             df_wins = df_wins[df_wins["_question"].str.contains(search.strip(), case=False, na=False)]
-        display_cols = ["Time", "Market", "Side", "EV", "Confidence", "Resolved"]
+        display_cols = ["Time", "Market", "Side", "Edge", "Return %", "Profit/$100", "Confidence", "Resolved"]
         st.dataframe(
             df_wins[display_cols].reset_index(drop=True),
             hide_index=True,
@@ -263,7 +265,7 @@ elif page == "❌  Losses":
     else:
         if search.strip():
             df_losses = df_losses[df_losses["_question"].str.contains(search.strip(), case=False, na=False)]
-        display_cols = ["Time", "Market", "Side", "EV", "Confidence", "Resolved"]
+        display_cols = ["Time", "Market", "Side", "Edge", "Return %", "Profit/$100", "Confidence", "Resolved"]
         st.dataframe(
             df_losses[display_cols].reset_index(drop=True),
             hide_index=True,
