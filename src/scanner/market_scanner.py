@@ -66,6 +66,7 @@ class MarketScanner:
             notifier=self.telegram,
         )
         self._scheduler = BlockingScheduler(timezone="UTC")
+        self._scan_offset = 0  # rotates through eligible markets each scan
 
     # ------------------------------------------------------------------ #
     # Scheduler                                                            #
@@ -158,7 +159,7 @@ class MarketScanner:
         markets = self.poly.get_all_active_markets()
         log.info(f"Fetched {len(markets)} markets from Polymarket")
 
-        eligible = sorted(
+        all_eligible = sorted(
             [
                 m for m in markets
                 if m.volume_24h >= settings.min_volume_usd
@@ -167,8 +168,21 @@ class MarketScanner:
             ],
             key=lambda m: m.volume_24h,
             reverse=True,
-        )[:settings.max_markets_per_scan]
-        log.info(f"{len(eligible)} markets selected (top by volume, min ${settings.min_volume_usd:,.0f})")
+        )
+
+        # Rotate through the eligible pool so each hourly scan covers a fresh
+        # batch instead of re-analysing the same top markets every time.
+        cap = settings.max_markets_per_scan
+        if all_eligible:
+            offset = self._scan_offset % len(all_eligible)
+            eligible = (all_eligible + all_eligible)[offset:offset + cap]
+            self._scan_offset = (offset + cap) % len(all_eligible)
+        else:
+            eligible = []
+        log.info(
+            f"{len(all_eligible)} eligible markets; analysing {len(eligible)} "
+            f"this scan (rotating offset, min ${settings.min_volume_usd:,.0f})"
+        )
 
         opportunities_found = 0
         errors = 0
