@@ -95,13 +95,15 @@ class MarketScanner:
             max_instances=1,
         )
 
-        # Resolution check every 15 min (offset by 5 min so it doesn't clash with scan)
+        # Price-track open positions every few minutes (free Polymarket calls, no Claude).
+        # Decoupled from the hourly scan so target/stop hits are caught promptly without
+        # paying for an AI scan each time.
         self._scheduler.add_job(
             self._run_resolution_check,
             "interval",
-            minutes=settings.scan_interval_minutes,
-            start_date=datetime.now(timezone.utc) + timedelta(minutes=5),
-            id="resolution_check",
+            minutes=settings.position_check_minutes,
+            start_date=datetime.now(timezone.utc) + timedelta(minutes=2),
+            id="position_check",
             max_instances=1,
         )
 

@@ -67,7 +67,8 @@ class Settings(BaseSettings):
     min_liquidity_usd: float = 10_000.0    # Min 24h volume
 
     # --- Scanner ---
-    scan_interval_minutes: int = 60
+    scan_interval_minutes: int = 60        # how often Claude scans for new edges (costs money)
+    position_check_minutes: int = 5        # how often open positions are priced (free Polymarket calls)
     max_markets_per_scan: int = 30
     min_ev_threshold: float = 0.05         # 5% minimum EV
     min_volume_usd: float = 25_000.0       # Min market volume to consider
