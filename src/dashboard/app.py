@@ -55,19 +55,19 @@ def load_predictions(outcome: str | None = None, limit: int = 1000) -> pd.DataFr
             target = p.predicted_prob
             current = p.current_price if p.current_price is not None else entry
             exit_p = p.exit_price
-            # Potential return if the target is hit (entry -> target)
-            potential = (target - entry) / entry if entry else 0.0
-            # Realized return if closed, else unrealized (current vs entry)
-            if exit_p is not None and entry:
-                realized = (exit_p - entry) / entry
-                ret_str = f"{realized:+.0%}"
-                profit_str = f"${realized * 100:+.0f}"
-            elif entry:
-                unreal = (current - entry) / entry
-                ret_str = f"{unreal:+.0%} (open)"
-                profit_str = f"${unreal * 100:+.0f}"
+            # Buying $100 of the chosen side at `entry` gets 100/entry shares.
+            # Selling at price x returns 100 * x / entry dollars.
+            if entry:
+                # What you GET back if it hits the target (your goal).
+                expected_100 = 100.0 * target / entry
+                # What you GET back if you cash out NOW (exit price if closed,
+                # otherwise the live current price).
+                live_price = exit_p if exit_p is not None else current
+                live_100 = 100.0 * live_price / entry
+                expected_str = f"${expected_100:.0f}"
+                live_str = f"${live_100:.0f}"
             else:
-                ret_str = profit_str = "—"
+                expected_str = live_str = "—"
             out.append({
                 "Time": p.created_at.strftime("%Y-%m-%d %H:%M") if p.created_at else "—",
                 "Market": p.question,
@@ -75,8 +75,8 @@ def load_predictions(outcome: str | None = None, limit: int = 1000) -> pd.DataFr
                 "Entry": f"{entry:.0%}",
                 "Target": f"{target:.0%}",
                 "Current": f"{current:.0%}",
-                "Potential": f"{potential:+.0%}",
-                "Return/$100": profit_str,
+                "Expected/$100": expected_str,
+                "Live/$100": live_str,
                 "Confidence": p.confidence.title(),
                 "Outcome": p.outcome,
                 "_question": p.question,
@@ -234,7 +234,7 @@ if page == "🏠  Home":
     if df_all.empty:
         st.info("No predictions yet — the bot will start recording positions on its first scan.")
     else:
-        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Return/$100", "Outcome"]
+        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Expected/$100", "Live/$100", "Outcome"]
         st.dataframe(
             _style_feed(df_all[display_cols]),
             hide_index=True,
@@ -260,7 +260,7 @@ elif page == "✅  Wins":
     else:
         if search.strip():
             df_wins = df_wins[df_wins["_question"].str.contains(search.strip(), case=False, na=False)]
-        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Return/$100", "Confidence"]
+        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Expected/$100", "Live/$100", "Confidence"]
         st.dataframe(
             df_wins[display_cols].reset_index(drop=True),
             hide_index=True,
@@ -286,7 +286,7 @@ elif page == "❌  Losses":
     else:
         if search.strip():
             df_losses = df_losses[df_losses["_question"].str.contains(search.strip(), case=False, na=False)]
-        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Return/$100", "Confidence"]
+        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Expected/$100", "Live/$100", "Confidence"]
         st.dataframe(
             df_losses[display_cols].reset_index(drop=True),
             hide_index=True,
