@@ -1,58 +1,129 @@
 # Polymarket Bot
 
-An automated prediction market scanner that finds mispriced markets on [Polymarket](https://polymarket.com), tracks every prediction it makes, and reports wins and losses to Telegram in real time.
+An automated **paper-trading** bot that finds mispriced markets on [Polymarket](https://polymarket.com), trades the price move, and tracks every position's win/loss and profit in real time on a live dashboard and via Telegram.
 
 **Live dashboard:** https://polymarket-bot-production-f7e4.up.railway.app
 
----
-
-## What It Does
-
-Every hour the bot:
-
-1. **Fetches the 30 highest-volume active markets** from Polymarket (min $25k 24h volume)
-2. **Searches the news** for recent articles related to each market question
-3. **Asks Claude AI** to estimate the true probability of the market resolving YES — independently of what the crowd currently prices it at
-4. **Calculates the edge**: if Claude's estimate differs significantly from the market price, there is a potential edge
-5. **Filters by EV > 5%**: only records a prediction if the expected value is positive enough to be worth tracking
-6. **Saves the prediction** to the database with the market question, predicted side (YES or NO), estimated probability, and EV
-7. **Checks all pending predictions** for resolution — when a market closes, it marks each one WIN or LOSS and sends a Telegram alert
+> **Paper trading:** the bot does **not** place real trades or risk real money. It records each position (entry price, target, stop) and tracks what you *would* have made. This is by design — you measure whether the strategy actually works before risking a dollar.
 
 ---
 
-## The Strategy
+## The Strategy — Trade the Price Move
 
-### Core Idea
+Prediction market prices reflect the crowd's view. The bot uses **Claude AI** to independently estimate the true probability of each market, then bets that the price will move toward Claude's estimate.
 
-Prediction markets are priced by the crowd. If Claude can identify cases where the crowd is systematically over- or under-estimating a probability, that gap is the edge.
+It is **not** a bet on the final event outcome — it's a bet on the **price correcting**, like buying a stock you think is underpriced and selling when it rises.
 
-The bot only records a prediction when two conditions are met:
-- **Edge > 5%** — Claude's estimate differs from the market price by at least 5 percentage points
-- **EV > 5%** — the expected payout justifies taking the position
+### How a position works
 
-### Expected Value Formula
+Using a football market as an example — **market price 55¢, Claude estimates 60¢:**
+
+| | |
+|---|---|
+| **Entry** | Buy the side at its market price (55¢) |
+| **Target** | Claude's estimate (60¢) → take-profit. Price rises here → **WIN** 🎯 |
+| **Stop** | Symmetric distance below entry (50¢) → cut the loss. Price drops here → **LOSS** 🛑 |
+
+The bot bets whichever side (YES or NO) it thinks the market has underpriced.
+
+### Exit rules
+
+A position closes the moment **any** of these happens:
+
+1. **Price hits the target** → WIN (sold for profit)
+2. **Price hits the stop** → LOSS (cut)
+3. **24 hours pass while in profit** → close at the current price (lock in the gain) ⏱
+4. **36 hours pass** (hard cap) → close no matter what, at the current price ⏱
+
+No position ever stays open longer than 36 hours, so the win rate fills in within days — not months.
+
+### Entry filters (quality bar)
+
+A position is only opened when **all** of these hold:
+
+| Filter | Rule | Why |
+|---|---|---|
+| Liquidity | 24h volume ≥ $25,000 | Only sharp, liquid markets |
+| Price range | Priced between 10% and 90% | Avoids junk long shots |
+| Minimum edge / EV | Expected value ≥ 5% | The gap is worth trading |
+| Win probability | Chosen side expected to win ≥ 55% | Targets a winning record, not just payout |
+| Plausibility | Disagreement with the market ≤ 35 points | A huge gap usually means Claude is wrong, not the market |
+
+The win-probability rule plus the symmetric stop is what makes the strategy positive-expectation: with equal reward and risk, it profits as long as the win rate beats 50%.
+
+---
+
+## How It Runs
+
+The scanner runs **two independent jobs**:
+
+| Job | What it does | Cost | Frequency |
+|---|---|---|---|
+| **Scan** | Claude analyses the top 30 markets for new edges | 💰 paid | every **hour** |
+| **Position check** | Reads live prices, applies target / stop / time exits | 🆓 free | every **5 minutes** |
+
+The price-checking uses Polymarket's free public API, so positions are watched closely (every 5 min) without paying for an AI scan each time. The scan rotates through the full pool of eligible markets so it covers everything over a few hours.
+
+---
+
+## Dashboard
+
+**Home** — a win-rate donut (green = win %, red = loss %) that auto-adjusts as positions close, plus a live feed of every position with:
+
+| Column | Meaning |
+|---|---|
+| **Entry / Target / Current** | The prices: where you bought, your goal, and the live price |
+| **Expected/$100** | Profit on a $100 stake **if it hits the target** (e.g. `+$9`) |
+| **Live/$100** | Profit on $100 **if you cashed out right now** (e.g. `+$4` or `-$5`) |
+| **Outcome** | PENDING / WIN / LOSS |
+
+**Wins / Losses** — searchable tables of every closed position. Auto-refreshes every 30 seconds.
+
+---
+
+## Telegram
+
+### Automatic alerts (the bot texts you)
+
+| When | Message |
+|---|---|
+| Position closes | WIN/LOSS with entry, exit, reason (🎯 target / 🛑 stop / ⏱ 24h / 🏁 resolved) and realized profit |
+| After each scan | "Scan complete" with each new edge and its expected return |
+| Daily 8 PM UTC | Win rate + all-time W/L summary |
+| Sunday 8 PM UTC | Weekly summary |
+| 1st of month 8 PM UTC | Monthly summary |
+
+### Commands (you text the bot)
+
+Send these to **@glitchi332bot** anytime:
+
+| Command | Reply |
+|---|---|
+| `/status` | Win rate, wins, losses, pending |
+| `/top` | Top 5 current opportunities |
+| `/pending` | Open positions |
+| `/ping` | Confirms the bot is alive |
+| `/help` | List of commands |
+
+---
+
+## What You Should Expect
+
+The strategy is structurally **positive-expectation if Claude is right more than 50% of the time**. A Monte Carlo of the mechanics (symmetric stop, 1% sizing, compounding):
 
 ```
-EV (YES) = estimated_prob × (1 / market_price - 1) - (1 - estimated_prob)
-Edge     = estimated_prob - market_price
+Yearly return on $1000 (≈100 trades/month):
+
+  Claude win rate    Return
+       50%           ~0%      ← break-even (no edge)
+       55%          +32%
+       60%          +74%
 ```
 
-**Example:** market says 40% chance of YES, Claude estimates 55%
-- Edge = 55% − 40% = **+15%**
-- EV = 0.55 × (1/0.40 − 1) − 0.45 = **+37.5%**
+**Nobody knows Claude's real win rate yet** — that's the whole point of running it on paper. After **50–100 resolved positions** (days to a couple of weeks, thanks to the 24/36h exits), the win-rate donut gives you the honest answer:
 
-### Position Sizing
-
-Uses **fractional Kelly criterion** (25% of full Kelly), capped at 1% of account equity per trade. This is conservative by design — the goal right now is to measure prediction accuracy across many markets before sizing up.
-
-### What Claude Brings to the Table
-
-Polymarket prices reflect the average view of many traders. Claude's potential edge:
-- Reasoning about complex multi-factor questions that are hard to price intuitively
-- Anchoring on historical base rates rather than just recent news sentiment
-- Avoiding overreaction to short-term news that doesn't fundamentally change the probability
-
-Whether Claude actually has an edge is measured over 50–100+ resolved predictions. The win rate on the dashboard is the ground truth.
+- Settles **above ~55%** → a real edge worth scaling with real money
+- Hovers around **50%** → the market is too efficient; you risked $0 to find out
 
 ---
 
@@ -60,148 +131,82 @@ Whether Claude actually has an edge is measured over 50–100+ resolved predicti
 
 ```
 Railway Service 1 — Dashboard (Streamlit)
-  src/dashboard/app.py
-  └── Reads from PostgreSQL, shows win-rate donut + live positions
+  streamlit run src/dashboard/app.py
+  └── Reads PostgreSQL → win-rate donut + live positions
 
 Railway Service 2 — Scanner (APScheduler)
-  src/main.py scan
-  ├── src/scanner/market_scanner.py     ← hourly scan loop
-  ├── src/api/polymarket.py             ← fetches markets from Polymarket
-  ├── src/api/news.py                   ← searches recent news articles
-  ├── src/analysis/probability.py       ← calls Claude AI for probability estimate
-  ├── src/analysis/ev_calculator.py     ← calculates edge & EV
-  ├── src/scanner/resolution_checker.py ← detects when markets resolve
-  └── src/notifications/telegram.py    ← sends alerts + listens for commands
+  python src/main.py scan
+  ├── src/scanner/market_scanner.py      ← hourly scan + 5-min position check
+  ├── src/api/polymarket.py              ← market data (free Gamma API)
+  ├── src/analysis/probability.py        ← Claude probability estimate
+  ├── src/analysis/ev_calculator.py      ← edge & EV
+  ├── src/scanner/resolution_checker.py  ← position tracker (target/stop/time/settle)
+  └── src/notifications/telegram.py     ← alerts + two-way commands
 ```
 
-### Database Tables
+### Key database fields (`predictions` table)
 
-| Table | What it stores |
+| Field | Meaning |
 |---|---|
-| `markets` | Every market seen, with current prices |
-| `opportunities` | Markets where EV > 5% |
-| `predictions` | Every prediction: WIN / LOSS / PENDING |
-| `scan_runs` | Log of every scan run (duration, markets scanned) |
-| `price_history` | Historical prices per market |
-
----
-
-## Telegram Integration
-
-### Automatic Alerts (bot texts you)
-
-| When | Message |
-|---|---|
-| Market resolves | WIN or LOSS alert with the question, predicted side, and EV |
-| Daily at 8 PM UTC | Win rate + all-time W/L summary |
-| Sunday at 8 PM UTC | Weekly summary |
-| 1st of month at 8 PM UTC | Monthly summary |
-
-### Commands (you text the bot)
-
-Send these to **@glitchi332bot** at any time:
-
-| Command | What you get back |
-|---|---|
-| `/status` | Win rate, total wins, losses, pending predictions |
-| `/top` | Top 5 current opportunities ranked by EV |
-| `/pending` | Last 10 open predictions waiting for resolution |
-| `/ping` | Confirms the bot is alive and running |
-| `/help` | List of all commands |
-
----
-
-## Dashboard
-
-**Home page** — donut chart showing win % (green) vs loss % (red) with the win rate in the center. Below it: a live scrolling feed of all positions. Green rows = wins, red rows = losses, white = still pending.
-
-**Wins page** — searchable table of every winning prediction with EV, confidence level, and resolution date.
-
-**Losses page** — searchable table of every losing prediction for review.
-
-The dashboard auto-refreshes every 30 seconds.
+| `implied_prob` | Entry price |
+| `predicted_prob` | Target price (Claude's estimate) |
+| `current_price` | Latest live price (refreshed every 5 min) |
+| `exit_price` | Price the position closed at |
+| `outcome` | PENDING / WIN / LOSS |
+| `exit_reason` | TARGET_HIT / STOP_LOSS / TIME_EXIT / RESOLVED |
 
 ---
 
 ## Cost
 
-| Resource | Monthly cost |
+| Resource | Monthly |
 |---|---|
-| Claude Haiku API (30 markets × 24 scans/day) | ~$60 |
+| Claude Haiku 4.5 (30 markets × 24 hourly scans) | ~$60 |
 | Railway (2 services + PostgreSQL) | ~$10–20 |
-| NewsAPI (free tier) | $0 |
+| Polymarket market data (public) | $0 |
 | **Total** | **~$70–80/month** |
+
+Position price-checking is free, so the 5-minute cadence adds nothing — only the hourly AI scan costs money.
 
 ---
 
-## Local Setup
-
-### 1. Clone and install
+## Setup
 
 ```bash
 git clone https://github.com/alphabh2trader-del/polymarket-bot.git
 cd polymarket-bot
 pip install -r requirements.txt
+cp config/.env.example .env   # fill in keys
+python src/main.py scan        # start the scanner
+python src/main.py dashboard   # start the dashboard (localhost:8501)
 ```
 
-### 2. Configure environment
-
-```bash
-cp config/.env.example .env
-# Fill in your API keys in .env
-```
-
-Required keys:
+Required environment variables:
 
 | Variable | Where to get it |
 |---|---|
 | `ANTHROPIC_API_KEY` | https://console.anthropic.com/keys |
-| `DATABASE_URL` | Railway PostgreSQL URL (or leave blank for local SQLite) |
-| `TELEGRAM_BOT_TOKEN` | Create a bot via @BotFather on Telegram |
-| `TELEGRAM_CHAT_ID` | Get your ID from @userinfobot on Telegram |
-| `NEWSAPI_KEY` | https://newsapi.org/register (free tier) |
+| `DATABASE_URL` | Railway PostgreSQL URL (or omit for local SQLite) |
+| `TELEGRAM_BOT_TOKEN` | @BotFather on Telegram |
+| `TELEGRAM_CHAT_ID` | @userinfobot on Telegram |
+| `NEWSAPI_KEY` | https://newsapi.org/register (optional — the bot runs without news) |
 
-### 3. Start the scanner
-
-```bash
-python src/main.py scan
-```
-
-### 4. Start the dashboard
-
-```bash
-python src/main.py dashboard
-# Opens at http://localhost:8501
-```
+> Polymarket needs **no API key** for market data. A wallet key is only required for *real* trading, which this bot does not do.
 
 ---
 
-## Railway Deployment
+## Key Settings (`config/settings.py`)
 
-Two services, one shared PostgreSQL database:
-
-**Service 1 — Dashboard**
-```
-Start command: streamlit run src/dashboard/app.py --server.port $PORT --server.address 0.0.0.0
-```
-
-**Service 2 — Scanner**
-```
-Start command: python src/main.py scan
-```
-
-Both services use the same 6 environment variables. The scanner writes predictions to PostgreSQL; the dashboard reads them.
-
----
-
-## Risk Management Rules
-
-- Max **1%** of account equity per trade
-- **25% fractional Kelly** for position sizing
-- Max **5% daily loss** limit
-- Min **$25k** 24h market volume required
-- Min **48 hours** to resolution required
-- Min **5% EV** required to record a prediction
+| Setting | Default | Meaning |
+|---|---|---|
+| `scan_interval_minutes` | 60 | How often Claude scans (paid) |
+| `position_check_minutes` | 5 | How often prices are checked (free) |
+| `profit_hold_hours` | 24 | Close a winning position after this long |
+| `max_hold_hours` | 36 | Hard cap — close any position after this long |
+| `max_markets_per_scan` | 30 | Markets analysed per scan |
+| `min_volume_usd` | 25,000 | Minimum 24h volume |
+| `min_win_probability` | 0.55 | Minimum expected win rate for the chosen side |
+| `min_ev_threshold` | 0.05 | Minimum EV to open a position |
 
 ---
 
@@ -212,10 +217,10 @@ POLYMARKET BOT/
 ├── src/
 │   ├── api/               # Polymarket + news clients
 │   ├── analysis/          # EV, Kelly, Claude probability estimator
-│   ├── scanner/           # Hourly scan loop + anomaly detection + resolution checker
+│   ├── scanner/           # Scan loop + position tracker (target/stop/time/settle)
 │   ├── risk/              # Risk management rules
-│   ├── database/          # SQLAlchemy models + PostgreSQL
-│   ├── dashboard/         # Streamlit multi-page UI
+│   ├── database/          # SQLAlchemy models + PostgreSQL (+ startup migration)
+│   ├── dashboard/         # Streamlit dashboard
 │   ├── notifications/     # Telegram alerts + two-way command listener
 │   ├── utils/             # Logger
 │   └── main.py            # CLI entry point
@@ -223,6 +228,5 @@ POLYMARKET BOT/
 │   ├── settings.py        # All settings (loaded from environment variables)
 │   └── .env.example       # Template — copy to .env and fill in
 ├── tests/                 # Unit tests
-├── logs/                  # Log files (auto-created)
 └── requirements.txt
 ```
