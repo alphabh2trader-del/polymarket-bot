@@ -23,6 +23,23 @@ from config.settings import settings
 from src.database.db import get_session, init_db
 from src.database.models import Prediction, ScanRun
 
+# Display all stored (naive-UTC) times in the configured timezone (Eastern).
+try:
+    import pytz
+    _TZ = pytz.timezone(settings.timezone)
+except Exception:
+    _TZ = None
+
+
+def _fmt_local(dt, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    """Format a naive-UTC datetime in the configured timezone (e.g. Eastern)."""
+    if dt is None:
+        return "—"
+    if _TZ is None:
+        return dt.strftime(fmt)
+    return pytz.utc.localize(dt).astimezone(_TZ).strftime(fmt)
+
+
 # ------------------------------------------------------------------ #
 # Page config                                                          #
 # ------------------------------------------------------------------ #
@@ -70,7 +87,7 @@ def load_predictions(outcome: str | None = None, limit: int = 1000) -> pd.DataFr
             else:
                 expected_str = live_str = "—"
             out.append({
-                "Time": p.created_at.strftime("%Y-%m-%d %H:%M") if p.created_at else "—",
+                "Time": _fmt_local(p.created_at),
                 "Market": p.question,
                 "Side": p.predicted_side,
                 "Entry": f"{entry:.0%}",
@@ -97,7 +114,7 @@ def get_last_scan() -> dict | None:
         if not run:
             return None
         return {
-            "completed_at": run.completed_at.strftime("%Y-%m-%d %H:%M UTC") if run.completed_at else "—",
+            "completed_at": _fmt_local(run.completed_at, "%Y-%m-%d %H:%M %Z"),
             "markets_scanned": run.markets_scanned,
             "opportunities_found": run.opportunities_found,
             "errors": run.errors or 0,
