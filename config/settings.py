@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, field_validator
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -11,6 +11,27 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
+
+    # Credentials pasted into hosting dashboards often pick up a stray leading
+    # or trailing space. A space in an API key/header value makes the HTTP
+    # client raise a bare "Connection error", and a space in a chat id makes
+    # Telegram return 400. Strip whitespace from every credential so this can
+    # never silently break the bot again.
+    @field_validator(
+        "polymarket_api_key",
+        "polymarket_private_key",
+        "newsapi_key",
+        "gnews_api_key",
+        "anthropic_api_key",
+        "anthropic_model",
+        "telegram_bot_token",
+        "telegram_chat_id",
+        "database_url",
+        mode="after",
+    )
+    @classmethod
+    def _strip_whitespace(cls, v: str) -> str:
+        return v.strip() if isinstance(v, str) else v
 
     # --- Polymarket ---
     polymarket_api_key: str = Field(default="", description="Polymarket CLOB API key")
