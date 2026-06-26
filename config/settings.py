@@ -69,7 +69,8 @@ class Settings(BaseSettings):
     # --- Scanner ---
     scan_interval_minutes: int = 60        # how often Claude scans for new edges (costs money)
     position_check_minutes: int = 5        # how often open positions are priced (free Polymarket calls)
-    max_hold_hours: int = 24               # force-close any open position after this many hours
+    profit_hold_hours: int = 24            # close a position in profit after this many hours
+    max_hold_hours: int = 36               # hard cap: force-close ANY open position after this many hours
     max_markets_per_scan: int = 30
     min_ev_threshold: float = 0.05         # 5% minimum EV
     min_volume_usd: float = 25_000.0       # Min market volume to consider

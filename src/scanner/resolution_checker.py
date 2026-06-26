@@ -78,9 +78,9 @@ class ResolutionChecker:
                     outcome, exit_price, exit_reason = "WIN", current, "TARGET_HIT"
                 elif current <= p["stop"]:
                     outcome, exit_price, exit_reason = "LOSS", current, "STOP_LOSS"
-                elif self._held_too_long(p["created_at"]):
-                    # Force-close after max_hold_hours at the current price, even if
-                    # neither target nor stop was hit. WIN if we're in profit, else LOSS.
+                elif self._time_exit_due(p["created_at"], current, p["entry"]):
+                    # Time close: 24h if in profit, 36h hard cap otherwise. Close at the
+                    # current price. WIN if we're in profit, else LOSS.
                     outcome = "WIN" if current > p["entry"] else "LOSS"
                     exit_price, exit_reason = current, "TIME_EXIT"
             else:
@@ -139,14 +139,22 @@ class ResolutionChecker:
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _held_too_long(created_at) -> bool:
-        """True if the position has been open longer than settings.max_hold_hours."""
+    def _time_exit_due(created_at, current: float, entry: float) -> bool:
+        """
+        Time-based close:
+          - in profit (current > entry)  -> close after profit_hold_hours (24h)
+          - otherwise                    -> hold until the hard cap max_hold_hours (36h)
+        """
         if created_at is None:
             return False
         from config.settings import settings
         # created_at is stored naive UTC (datetime.utcnow)
         age_hours = (datetime.utcnow() - created_at).total_seconds() / 3600
-        return age_hours >= settings.max_hold_hours
+        if current > entry and age_hours >= settings.profit_hold_hours:
+            return True
+        if age_hours >= settings.max_hold_hours:
+            return True
+        return False
 
     def _current_side_price(self, condition_id: str, side: str) -> float | None:
         """
