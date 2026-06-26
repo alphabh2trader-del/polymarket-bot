@@ -65,7 +65,7 @@ class MarketScanner:
             poly=self.poly,
             notifier=self.telegram,
         )
-        self._scheduler = BlockingScheduler(timezone="UTC")
+        self._scheduler = BlockingScheduler(timezone=settings.timezone)
         self._scan_offset = 0  # rotates through eligible markets each scan
 
     # ------------------------------------------------------------------ #
@@ -107,7 +107,7 @@ class MarketScanner:
             max_instances=1,
         )
 
-        # Daily summary at 20:00 UTC
+        # Daily summary at 20:00 local time (scheduler tz = settings.timezone)
         self._scheduler.add_job(
             self._send_daily_report,
             "cron",
@@ -116,7 +116,7 @@ class MarketScanner:
             id="daily_report",
         )
 
-        # Weekly summary — Sunday at 20:00 UTC
+        # Weekly summary — Sunday at 20:00 local time
         self._scheduler.add_job(
             self._send_weekly_report,
             "cron",
@@ -126,7 +126,7 @@ class MarketScanner:
             id="weekly_report",
         )
 
-        # Monthly summary — 1st of month at 20:00 UTC
+        # Monthly summary — 1st of month at 20:00 local time
         self._scheduler.add_job(
             self._send_monthly_report,
             "cron",

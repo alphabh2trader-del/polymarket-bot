@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     volume_spike_multiplier: float = 3.0   # 3× average = spike
     price_move_threshold: float = 0.10     # 10% price move = anomaly
 
+    # --- Schedule / time zone ---
+    # IANA timezone used for the scheduler (when daily/weekly/monthly summaries
+    # fire) and for the times shown in Telegram messages. Default: Eastern (Canada).
+    timezone: str = "America/Toronto"
+
     # --- Telegram ---
     telegram_bot_token: str = Field(default="", description="Telegram Bot API token from @BotFather")
     telegram_chat_id: str = Field(default="", description="Telegram chat ID to receive notifications")

@@ -18,6 +18,23 @@ from typing import Callable
 
 import requests
 
+from config.settings import settings
+
+# Timezone for all displayed times. pytz ships with apscheduler and bundles its
+# own tz database, so this works on any host without system tzdata.
+try:
+    import pytz
+    _TZ = pytz.timezone(settings.timezone)
+except Exception:
+    _TZ = None
+
+
+def _local(fmt: str) -> str:
+    """Current time in the configured timezone, formatted. Falls back to UTC."""
+    if _TZ is not None:
+        return datetime.now(_TZ).strftime(fmt)
+    return datetime.utcnow().strftime(fmt) + " UTC"
+
 from src.utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -87,7 +104,7 @@ class TelegramNotifier:
             f"<b>Entry:</b> {entry_price:.0%}  →  <b>Exit:</b> {exit_price:.0%}\n"
             f"<b>Return:</b> {return_pct:+.1%}   (${profit_100:+.0f} per $100)\n"
             f"<b>Confidence:</b> {confidence.title()}\n"
-            f"<i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>"
+            f"<i>{_local('%Y-%m-%d %H:%M %Z')}</i>"
         )
         return self._send(text)
 
@@ -105,7 +122,7 @@ class TelegramNotifier:
           question, side, edge (fraction), ev (fraction), size (usd)
         EV is the expected return — on $100 you'd expect to make ev*$100.
         """
-        when = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        when = _local("%Y-%m-%d %H:%M %Z")
 
         if not opportunities:
             text = (
@@ -147,7 +164,7 @@ class TelegramNotifier:
     ) -> bool:
         rate_str = f"{win_rate:.1%}" if win_rate is not None else "N/A"
         text = (
-            f"<b>Daily Win Rate — {datetime.utcnow().strftime('%Y-%m-%d')}</b>\n\n"
+            f"<b>Daily Win Rate — {_local('%Y-%m-%d')}</b>\n\n"
             f"All-time:  {wins}W  /  {losses}L\n"
             f"Still pending:  {pending}\n"
             f"<b>Win rate: {rate_str}</b>"
@@ -165,7 +182,7 @@ class TelegramNotifier:
     ) -> bool:
         rate_str = f"{win_rate:.1%}" if win_rate is not None else "N/A"
         text = (
-            f"<b>Weekly Summary — week ending {datetime.utcnow().strftime('%Y-%m-%d')}</b>\n\n"
+            f"<b>Weekly Summary — week ending {_local('%Y-%m-%d')}</b>\n\n"
             f"This week:  {week_wins}W  /  {week_losses}L\n"
             f"All time:  {wins}W  /  {losses}L  /  {pending} pending\n"
             f"<b>Win rate (all time): {rate_str}</b>"
@@ -183,7 +200,7 @@ class TelegramNotifier:
     ) -> bool:
         rate_str = f"{win_rate:.1%}" if win_rate is not None else "N/A"
         text = (
-            f"<b>Monthly Summary — {datetime.utcnow().strftime('%B %Y')}</b>\n\n"
+            f"<b>Monthly Summary — {_local('%B %Y')}</b>\n\n"
             f"This month:  {month_wins}W  /  {month_losses}L\n"
             f"All time:  {wins}W  /  {losses}L  /  {pending} pending\n"
             f"<b>Win rate (all time): {rate_str}</b>"
