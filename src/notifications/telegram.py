@@ -75,6 +75,7 @@ class TelegramNotifier:
         reason_label = {
             "TARGET_HIT": "🎯 Hit target — sold for profit",
             "STOP_LOSS": "🛑 Stopped out — cut the loss",
+            "TIME_EXIT": "⏱ Closed after 24h",
             "RESOLVED": "🏁 Market resolved",
         }.get(exit_reason, exit_reason)
         header = "✅ WIN" if outcome == "WIN" else "❌ LOSS"
