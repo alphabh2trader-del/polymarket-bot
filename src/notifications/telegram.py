@@ -66,18 +66,25 @@ class TelegramNotifier:
         question: str,
         predicted_side: str,
         outcome: str,
-        ev: float,
+        entry_price: float,
+        exit_price: float,
+        return_pct: float,
+        exit_reason: str,
         confidence: str,
-        resolution_value: str,
     ) -> bool:
-        label = "WIN" if outcome == "WIN" else "LOSS"
-        marker = "+" if outcome == "WIN" else "-"
+        reason_label = {
+            "TARGET_HIT": "🎯 Hit target — sold for profit",
+            "STOP_LOSS": "🛑 Stopped out — cut the loss",
+            "RESOLVED": "🏁 Market resolved",
+        }.get(exit_reason, exit_reason)
+        header = "✅ WIN" if outcome == "WIN" else "❌ LOSS"
+        profit_100 = return_pct * 100
         text = (
-            f"<b>[{marker}1] {label}</b>\n\n"
+            f"<b>{header}</b>  ({reason_label})\n\n"
             f"<b>Market:</b> {question[:150]}\n"
-            f"<b>Predicted:</b> {predicted_side}   "
-            f"<b>Resolved:</b> {resolution_value}\n"
-            f"<b>EV was:</b> {ev:.1%}   "
+            f"<b>Side:</b> {predicted_side}\n"
+            f"<b>Entry:</b> {entry_price:.0%}  →  <b>Exit:</b> {exit_price:.0%}\n"
+            f"<b>Return:</b> {return_pct:+.1%}   (${profit_100:+.0f} per $100)\n"
             f"<b>Confidence:</b> {confidence.title()}\n"
             f"<i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>"
         )

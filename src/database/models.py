@@ -100,7 +100,18 @@ class ScanRun(Base):
 
 
 class Prediction(Base):
-    """One prediction per unique (condition_id, predicted_side). Tracks WIN/LOSS vs market outcome."""
+    """
+    One open paper position per unique (condition_id, predicted_side).
+
+    Trade-the-price strategy:
+      implied_prob   = entry price of the chosen side (price we "bought" at)
+      predicted_prob = target price (Claude's estimate) -> take-profit level
+      stop price     = symmetric below entry = 2*implied_prob - predicted_prob
+      current_price  = latest price of the chosen side (refreshed each scan)
+      exit_price     = price we "sold" at when the position closed
+      outcome        = PENDING / WIN (hit target) / LOSS (hit stop or resolved against us)
+      exit_reason    = TARGET_HIT / STOP_LOSS / RESOLVED
+    """
     __tablename__ = "predictions"
 
     id = Column(Integer, primary_key=True)
@@ -109,20 +120,30 @@ class Prediction(Base):
     condition_id = Column(String, nullable=False, index=True)
     question = Column(Text, nullable=False)
     predicted_side = Column(String, nullable=False)   # YES / NO
-    predicted_prob = Column(Float, nullable=False)    # our Claude estimate
-    implied_prob = Column(Float, nullable=False)      # market price at prediction time
+    predicted_prob = Column(Float, nullable=False)    # target price (Claude estimate)
+    implied_prob = Column(Float, nullable=False)      # entry price at prediction time
     ev = Column(Float, nullable=False)
     confidence = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     resolved_at = Column(DateTime, nullable=True)
     outcome = Column(String, default="PENDING")       # PENDING / WIN / LOSS
-    resolution_value = Column(String, nullable=True)  # YES / NO as returned by Polymarket
+    resolution_value = Column(String, nullable=True)  # YES / NO if the market resolved
+
+    # --- trade-the-price tracking ---
+    current_price = Column(Float, nullable=True)      # latest price of the chosen side
+    exit_price = Column(Float, nullable=True)         # price the position closed at
+    exit_reason = Column(String, nullable=True)       # TARGET_HIT / STOP_LOSS / RESOLVED
 
     market = relationship("Market", back_populates="predictions")
     opportunity = relationship("Opportunity", back_populates="prediction")
 
+    @property
+    def stop_price(self) -> float:
+        """Symmetric stop: as far below entry as the target is above it."""
+        return round(2 * self.implied_prob - self.predicted_prob, 4)
+
     def __repr__(self) -> str:
-        return f"<Prediction {self.predicted_side} [{self.outcome}] EV={self.ev:.2f}>"
+        return f"<Prediction {self.predicted_side} [{self.outcome}] entry={self.implied_prob:.2f} target={self.predicted_prob:.2f}>"
 
 
 class PriceHistory(Base):

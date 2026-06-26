@@ -443,6 +443,7 @@ class MarketScanner:
                         predicted_side=opp.recommended_side,
                         predicted_prob=opp.estimated_prob,
                         implied_prob=opp.implied_prob,
+                        current_price=opp.implied_prob,
                         ev=opp.ev,
                         confidence=opp.confidence,
                         created_at=opp.created_at,
@@ -458,12 +459,12 @@ class MarketScanner:
     # ------------------------------------------------------------------ #
 
     def _run_resolution_check(self) -> None:
-        log.info("Checking pending predictions for resolution...")
+        log.info("Tracking open positions (target / stop / settle)...")
         try:
             wins, losses = self.resolver.check_pending()
-            log.info(f"Resolution check done: {wins}W / {losses}L")
+            log.info(f"Position check done: {wins}W / {losses}L closed this run")
         except Exception as exc:
-            log.error(f"Resolution check failed: {exc}")
+            log.error(f"Position check failed: {exc}")
 
     # ------------------------------------------------------------------ #
     # Scheduled Telegram reports                                           #
@@ -714,14 +715,18 @@ class MarketScanner:
                 condition_id=condition_id,
                 question=question,
                 predicted_side=ev_result.side,
-                predicted_prob=ev_result.estimated_prob,
-                implied_prob=ev_result.implied_prob,
+                predicted_prob=ev_result.estimated_prob,   # target price
+                implied_prob=ev_result.implied_prob,       # entry price
+                current_price=ev_result.implied_prob,      # starts at entry
                 ev=ev_result.ev,
                 confidence=estimate.confidence,
             )
             session.add(pred)
             session.flush()
-            log.info(f"PREDICTION saved: {ev_result.side} on {question[:60]}")
+            log.info(
+                f"POSITION opened: {ev_result.side} on {question[:55]} "
+                f"entry={ev_result.implied_prob:.2f} target={ev_result.estimated_prob:.2f}"
+            )
             return pred.id
 
     @staticmethod
