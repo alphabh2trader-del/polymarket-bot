@@ -56,16 +56,17 @@ def load_predictions(outcome: str | None = None, limit: int = 1000) -> pd.DataFr
             current = p.current_price if p.current_price is not None else entry
             exit_p = p.exit_price
             # Buying $100 of the chosen side at `entry` gets 100/entry shares.
-            # Selling at price x returns 100 * x / entry dollars.
+            # Profit when selling at price x = 100 * (x - entry) / entry dollars.
+            def _money(x: float) -> str:
+                return f"+${x:.0f}" if x >= 0 else f"-${abs(x):.0f}"
             if entry:
-                # What you GET back if it hits the target (your goal).
-                expected_100 = 100.0 * target / entry
-                # What you GET back if you cash out NOW (exit price if closed,
-                # otherwise the live current price).
+                # PROFIT if it hits the target (your goal).
+                expected_profit = 100.0 * (target - entry) / entry
+                # PROFIT if you cash out NOW (exit price if closed, else live price).
                 live_price = exit_p if exit_p is not None else current
-                live_100 = 100.0 * live_price / entry
-                expected_str = f"${expected_100:.0f}"
-                live_str = f"${live_100:.0f}"
+                live_profit = 100.0 * (live_price - entry) / entry
+                expected_str = _money(expected_profit)
+                live_str = _money(live_profit)
             else:
                 expected_str = live_str = "—"
             out.append({
