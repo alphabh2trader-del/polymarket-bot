@@ -24,11 +24,18 @@ from src.database.db import get_session, init_db
 from src.database.models import Prediction, ScanRun
 
 # Display all stored (naive-UTC) times in the configured timezone (Eastern).
+# Use stdlib zoneinfo (APScheduler 3.10+ no longer ships pytz), with a pytz
+# fallback just in case.
+from datetime import timezone as _utc
 try:
-    import pytz
-    _TZ = pytz.timezone(settings.timezone)
+    from zoneinfo import ZoneInfo
+    _TZ = ZoneInfo(settings.timezone)
 except Exception:
-    _TZ = None
+    try:
+        import pytz
+        _TZ = pytz.timezone(settings.timezone)
+    except Exception:
+        _TZ = None
 
 
 def _fmt_local(dt, fmt: str = "%Y-%m-%d %H:%M") -> str:
@@ -37,7 +44,9 @@ def _fmt_local(dt, fmt: str = "%Y-%m-%d %H:%M") -> str:
         return "—"
     if _TZ is None:
         return dt.strftime(fmt)
-    return pytz.utc.localize(dt).astimezone(_TZ).strftime(fmt)
+    # Treat the naive value as UTC, then convert. astimezone works for both
+    # ZoneInfo and pytz tz objects.
+    return dt.replace(tzinfo=_utc.utc).astimezone(_TZ).strftime(fmt)
 
 
 # ------------------------------------------------------------------ #

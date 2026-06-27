@@ -20,13 +20,18 @@ import requests
 
 from config.settings import settings
 
-# Timezone for all displayed times. pytz ships with apscheduler and bundles its
-# own tz database, so this works on any host without system tzdata.
+# Timezone for all displayed times. Use stdlib zoneinfo (APScheduler 3.10+ no
+# longer ships pytz), with a pytz fallback. tzdata (in requirements) guarantees
+# the tz database is present even on slim containers.
 try:
-    import pytz
-    _TZ = pytz.timezone(settings.timezone)
+    from zoneinfo import ZoneInfo
+    _TZ = ZoneInfo(settings.timezone)
 except Exception:
-    _TZ = None
+    try:
+        import pytz
+        _TZ = pytz.timezone(settings.timezone)
+    except Exception:
+        _TZ = None
 
 
 def _local(fmt: str) -> str:

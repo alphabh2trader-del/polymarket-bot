@@ -18,6 +18,9 @@ psycopg2-binary>=2.9.0
 # Scheduler
 apscheduler>=3.10.0
 
+# Timezone database (for zoneinfo on slim containers — Eastern time display)
+tzdata>=2024.1
+
 # Dashboard
 streamlit>=1.40.0
 pandas>=2.0.0
