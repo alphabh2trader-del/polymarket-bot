@@ -252,7 +252,7 @@ if page == "🏠  Home":
     if df_all.empty:
         st.info("No predictions yet — the bot will start recording positions on its first scan.")
     else:
-        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Expected/$100", "Live/$100", "Outcome"]
+        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Expected/$100", "Live/$100", "Confidence", "Outcome"]
         st.dataframe(
             _style_feed(df_all[display_cols]),
             hide_index=True,
