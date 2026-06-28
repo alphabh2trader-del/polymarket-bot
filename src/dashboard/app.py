@@ -143,6 +143,72 @@ def get_stats() -> tuple[int, int, int]:
     return counts.get("WIN", 0), counts.get("LOSS", 0), counts.get("PENDING", 0)
 
 
+@st.cache_data(ttl=30)
+def get_performance() -> dict | None:
+    """
+    Performance over every closed WIN/LOSS bet (VOID/PENDING ignored).
+
+      compounded_pct  — reinvest each bet: equity *= (1 + return), chronological
+      total_profit    — flat $100 per bet: sum of return * $100
+      avg_daily_wr    — mean of each day's win rate (wins/(wins+losses) per day)
+      days            — calendar days since the first bet
+      per_day         — closed bets per day
+    """
+    from datetime import datetime as _dt
+    with get_session() as session:
+        rows = (
+            session.query(Prediction)
+            .filter(Prediction.outcome.in_(("WIN", "LOSS")))
+            .order_by(Prediction.created_at)
+            .all()
+        )
+        bets = [
+            {
+                "entry": p.implied_prob,
+                "exit": p.exit_price if p.exit_price is not None else p.current_price,
+                "outcome": p.outcome,
+                "day": (p.resolved_at or p.created_at).date(),
+                "created": p.created_at,
+            }
+            for p in rows
+        ]
+    if not bets:
+        return None
+
+    equity = 1.0
+    total_profit = 0.0
+    for b in bets:
+        if not b["entry"] or b["exit"] is None:
+            continue
+        ret = (b["exit"] - b["entry"]) / b["entry"]
+        equity *= (1 + ret)
+        total_profit += ret * 100.0
+
+    # Average win rate per day.
+    by_day: dict = {}
+    for b in bets:
+        w, l = by_day.get(b["day"], (0, 0))
+        if b["outcome"] == "WIN":
+            w += 1
+        else:
+            l += 1
+        by_day[b["day"]] = (w, l)
+    daily_rates = [w / (w + l) for (w, l) in by_day.values() if (w + l) > 0]
+    avg_daily_wr = sum(daily_rates) / len(daily_rates) if daily_rates else None
+
+    first = bets[0]["created"]
+    days = max((_dt.utcnow() - first).days, 1)
+
+    return {
+        "compounded_pct": equity - 1.0,
+        "total_profit": total_profit,
+        "avg_daily_wr": avg_daily_wr,
+        "days": days,
+        "per_day": len(bets) / days,
+        "n": len(bets),
+    }
+
+
 # ------------------------------------------------------------------ #
 # Sidebar — navigation                                                 #
 # ------------------------------------------------------------------ #
@@ -253,6 +319,34 @@ if page == "🏠  Home":
         c1.metric("Wins", wins)
         c2.metric("Losses", losses)
         c3.metric("Pending", pending)
+
+    st.divider()
+    st.subheader("Performance")
+    perf = get_performance()
+    if not perf:
+        st.info("No closed bets yet — performance will appear once positions start resolving.")
+    else:
+        p1, p2, p3, p4 = st.columns(4)
+        p1.metric(
+            "Compounded Return",
+            f"{perf['compounded_pct']:+.1%}",
+            help="Reinvest every bet: equity ×(1+return), in order. This is your true running return.",
+        )
+        p2.metric(
+            "Total Profit ($100/bet)",
+            f"${perf['total_profit']:+,.0f}",
+            help="If you staked a flat $100 on every closed bet, this is the summed profit.",
+        )
+        p3.metric(
+            "Avg Win Rate / Day",
+            f"{perf['avg_daily_wr']:.0%}" if perf["avg_daily_wr"] is not None else "—",
+            help="Average of each day's win rate, across the days the bot has been trading.",
+        )
+        p4.metric(
+            "Days Running",
+            f"{perf['days']}",
+            help=f"{perf['n']} closed bets — about {perf['per_day']:.1f} per day.",
+        )
 
     st.divider()
     st.subheader("Live Positions")

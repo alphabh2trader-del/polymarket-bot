@@ -87,13 +87,14 @@ class ResolutionChecker:
                 # Not in the active set -> market is likely closed; settle on outcome.
                 resolution = self._resolve(p["condition_id"])
                 if resolution is not None:
-                    if resolution == p["side"]:
-                        outcome, exit_price, exit_reason = "WIN", 1.0, "RESOLVED"
-                    else:
-                        # Our side lost -> the position is worth $0. Under the 5%
-                        # stop this should never happen; treat $0 closes as VOID
-                        # (excluded from win rate and profit).
-                        outcome, exit_price, exit_reason = "VOID", 0.0, "RESOLVED"
+                    # Under the trade-the-price strategy a position should always
+                    # exit via target/stop/time BEFORE the market resolves. If it
+                    # still resolved, the close is an artifact (price snapped to
+                    # $1 or $0), so it doesn't count either way -> VOID. This keeps
+                    # the win rate symmetric: neither resolution-wins nor
+                    # resolution-losses inflate or deflate the stats.
+                    exit_value = 1.0 if resolution == p["side"] else 0.0
+                    outcome, exit_price, exit_reason = "VOID", exit_value, "RESOLVED"
 
             # Safety net: any close at $0 doesn't count.
             if outcome in ("WIN", "LOSS") and exit_price is not None and exit_price <= 0.0:
