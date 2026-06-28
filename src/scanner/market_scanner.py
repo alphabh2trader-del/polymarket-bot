@@ -87,7 +87,7 @@ class MarketScanner:
         self.run_scan()
         self._run_resolution_check()
 
-        # Recurring scan every 15 min
+        # Recurring Claude scan on the configured interval (hourly by default)
         self._scheduler.add_job(
             self.run_scan,
             "interval",

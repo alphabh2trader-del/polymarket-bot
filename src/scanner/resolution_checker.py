@@ -112,7 +112,11 @@ class ResolutionChecker:
                     pred.exit_reason = exit_reason
                     pred.resolved_at = datetime.now(timezone.utc)
                     if exit_reason == "RESOLVED":
-                        pred.resolution_value = p["side"] if outcome == "WIN" else (
+                        # Record the true winning side. RESOLVED closes are VOID
+                        # either way now, so infer the winner from exit_price:
+                        # 1.0 -> our side won, 0.0 -> the other side won.
+                        our_side_won = exit_price is not None and exit_price >= 1.0
+                        pred.resolution_value = p["side"] if our_side_won else (
                             "NO" if p["side"] == "YES" else "YES"
                         )
 
