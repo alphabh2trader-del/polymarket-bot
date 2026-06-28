@@ -139,8 +139,10 @@ class Prediction(Base):
 
     @property
     def stop_price(self) -> float:
-        """Symmetric stop: as far below entry as the target is above it."""
-        return round(2 * self.implied_prob - self.predicted_prob, 4)
+        """Stop-loss price: cut the position once it's down stop_loss_pct (5%)
+        from entry. e.g. entry 0.60 -> stop at 0.57 (a 5% loss on the stake)."""
+        from config.settings import settings
+        return round(self.implied_prob * (1 - settings.stop_loss_pct), 4)
 
     def __repr__(self) -> str:
         return f"<Prediction {self.predicted_side} [{self.outcome}] entry={self.implied_prob:.2f} target={self.predicted_prob:.2f}>"

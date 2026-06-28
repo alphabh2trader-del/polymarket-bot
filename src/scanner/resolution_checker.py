@@ -90,7 +90,14 @@ class ResolutionChecker:
                     if resolution == p["side"]:
                         outcome, exit_price, exit_reason = "WIN", 1.0, "RESOLVED"
                     else:
-                        outcome, exit_price, exit_reason = "LOSS", 0.0, "RESOLVED"
+                        # Our side lost -> the position is worth $0. Under the 5%
+                        # stop this should never happen; treat $0 closes as VOID
+                        # (excluded from win rate and profit).
+                        outcome, exit_price, exit_reason = "VOID", 0.0, "RESOLVED"
+
+            # Safety net: any close at $0 doesn't count.
+            if outcome in ("WIN", "LOSS") and exit_price is not None and exit_price <= 0.0:
+                outcome = "VOID"
 
             with get_session() as session:
                 pred = session.get(Prediction, p["id"])
@@ -110,20 +117,22 @@ class ResolutionChecker:
 
             if outcome:
                 ret = (exit_price - p["entry"]) / p["entry"] if p["entry"] else 0.0
-                self.notifier.send_outcome(
-                    question=p["question"],
-                    predicted_side=p["side"],
-                    outcome=outcome,
-                    entry_price=p["entry"],
-                    exit_price=exit_price,
-                    return_pct=ret,
-                    exit_reason=exit_reason,
-                    confidence=p["confidence"],
-                )
-                if outcome == "WIN":
-                    wins += 1
-                else:
-                    losses += 1
+                # VOID positions don't count toward win/loss and get no alert.
+                if outcome in ("WIN", "LOSS"):
+                    self.notifier.send_outcome(
+                        question=p["question"],
+                        predicted_side=p["side"],
+                        outcome=outcome,
+                        entry_price=p["entry"],
+                        exit_price=exit_price,
+                        return_pct=ret,
+                        exit_reason=exit_reason,
+                        confidence=p["confidence"],
+                    )
+                    if outcome == "WIN":
+                        wins += 1
+                    else:
+                        losses += 1
                 log.info(
                     f"{outcome} [{exit_reason}]: {p['question'][:55]} | "
                     f"entry={p['entry']:.2f} exit={exit_price:.2f} ret={ret:+.1%}"
