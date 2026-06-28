@@ -150,7 +150,9 @@ def get_performance() -> dict | None:
 
       compounded_pct  — reinvest each bet: equity *= (1 + return), chronological
       total_profit    — flat $100 per bet: sum of return * $100
-      avg_daily_wr    — mean of each day's win rate (wins/(wins+losses) per day)
+      avg_profit_bet  — mean return % per bet (= return on $1000 split equally
+                        across every bet)
+      avg_profit_day  — mean of each day's average return % (avg profit per day)
       days            — calendar days since the first bet
       per_day         — closed bets per day
     """
@@ -177,24 +179,22 @@ def get_performance() -> dict | None:
 
     equity = 1.0
     total_profit = 0.0
+    returns_by_day: dict = {}   # day -> list of per-bet returns
+    all_returns: list = []
     for b in bets:
         if not b["entry"] or b["exit"] is None:
             continue
         ret = (b["exit"] - b["entry"]) / b["entry"]
         equity *= (1 + ret)
         total_profit += ret * 100.0
+        all_returns.append(ret)
+        returns_by_day.setdefault(b["day"], []).append(ret)
 
-    # Average win rate per day.
-    by_day: dict = {}
-    for b in bets:
-        w, l = by_day.get(b["day"], (0, 0))
-        if b["outcome"] == "WIN":
-            w += 1
-        else:
-            l += 1
-        by_day[b["day"]] = (w, l)
-    daily_rates = [w / (w + l) for (w, l) in by_day.values() if (w + l) > 0]
-    avg_daily_wr = sum(daily_rates) / len(daily_rates) if daily_rates else None
+    # Average profit per bet = return on $1000 split equally across every bet.
+    avg_profit_bet = sum(all_returns) / len(all_returns) if all_returns else None
+    # Average profit per day = mean of each day's average bet return.
+    daily_avgs = [sum(r) / len(r) for r in returns_by_day.values() if r]
+    avg_profit_day = sum(daily_avgs) / len(daily_avgs) if daily_avgs else None
 
     first = bets[0]["created"]
     days = max((_dt.utcnow() - first).days, 1)
@@ -202,7 +202,8 @@ def get_performance() -> dict | None:
     return {
         "compounded_pct": equity - 1.0,
         "total_profit": total_profit,
-        "avg_daily_wr": avg_daily_wr,
+        "avg_profit_bet": avg_profit_bet,
+        "avg_profit_day": avg_profit_day,
         "days": days,
         "per_day": len(bets) / days,
         "n": len(bets),
@@ -338,14 +339,18 @@ if page == "🏠  Home":
             help="If you staked a flat $100 on every closed bet, this is the summed profit.",
         )
         p3.metric(
-            "Avg Win Rate / Day",
-            f"{perf['avg_daily_wr']:.0%}" if perf["avg_daily_wr"] is not None else "—",
-            help="Average of each day's win rate, across the days the bot has been trading.",
+            "Avg Profit / Bet",
+            f"{perf['avg_profit_bet']:+.1%}" if perf["avg_profit_bet"] is not None else "—",
+            help="Average return per bet — i.e. your return if you'd split a flat stake (say $1000) equally across every bet.",
         )
         p4.metric(
-            "Days Running",
-            f"{perf['days']}",
-            help=f"{perf['n']} closed bets — about {perf['per_day']:.1f} per day.",
+            "Avg Profit / Day",
+            f"{perf['avg_profit_day']:+.1%}" if perf["avg_profit_day"] is not None else "—",
+            help="Average of each day's average return %. What a typical trading day earned.",
+        )
+        st.caption(
+            f"Based on {perf['n']} closed bets over {perf['days']} day(s) "
+            f"(~{perf['per_day']:.1f} per day)."
         )
 
     st.divider()
