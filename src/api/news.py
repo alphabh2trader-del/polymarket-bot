@@ -2,9 +2,10 @@
 Multi-source news aggregator.
 
 Sources:
-  1. NewsAPI.org  — keyword search, structured JSON
-  2. GNews API    — fallback keyword search
-  3. RSS feeds    — Reuters, AP, BBC via feedparser (no key needed)
+  1. TheNewsAPI   — keyword search, structured JSON (primary)
+  2. NewsAPI.org  — keyword search, structured JSON
+  3. GNews API    — fallback keyword search
+  4. RSS feeds    — Reuters, AP, BBC via feedparser (no key needed)
 """
 
 from __future__ import annotations
@@ -47,9 +48,10 @@ RSS_FEEDS = {
 
 
 class NewsAggregator:
-    def __init__(self, newsapi_key: str = "", gnews_key: str = ""):
+    def __init__(self, newsapi_key: str = "", gnews_key: str = "", thenewsapi_key: str = ""):
         self.newsapi_key = newsapi_key
         self.gnews_key = gnews_key
+        self.thenewsapi_key = thenewsapi_key
         self._session = requests.Session()
         self._session.headers.update({"User-Agent": "PolymarketBot/1.0"})
 
@@ -66,6 +68,7 @@ class NewsAggregator:
         seen_hashes: set[str] = set()
 
         sources = [
+            self._search_thenewsapi,
             self._search_newsapi,
             self._search_gnews,
             self._search_rss,
@@ -83,6 +86,52 @@ class NewsAggregator:
 
         articles.sort(key=lambda a: a.published_at.replace(tzinfo=None), reverse=True)
         log.debug(f"Found {len(articles)} articles for query '{query}'")
+        return articles
+
+    # ------------------------------------------------------------------ #
+    # TheNewsAPI (primary)                                                 #
+    # ------------------------------------------------------------------ #
+
+    @retry(
+        retry=retry_if_exception_type(requests.RequestException),
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(min=1, max=10),
+        reraise=False,
+    )
+    def _search_thenewsapi(self, query: str, days_back: int) -> list[Article]:
+        if not self.thenewsapi_key:
+            return []
+
+        published_after = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+        resp = self._session.get(
+            "https://api.thenewsapi.com/v1/news/all",
+            params={
+                "api_token": self.thenewsapi_key,
+                "search": query,
+                "language": "en",
+                "published_after": published_after,
+                "sort": "relevance_score",
+                "limit": 10,   # free tier caps this lower; the API clamps it.
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        articles = []
+        for item in data.get("data", []):
+            try:
+                raw = (item.get("published_at") or "").replace("Z", "+00:00")
+                published = datetime.fromisoformat(raw)
+                articles.append(Article(
+                    title=item.get("title", ""),
+                    url=item.get("url", ""),
+                    source=item.get("source", "TheNewsAPI"),
+                    published_at=published,
+                    snippet=item.get("description", "") or item.get("snippet", ""),
+                ))
+            except Exception:
+                continue
         return articles
 
     # ------------------------------------------------------------------ #

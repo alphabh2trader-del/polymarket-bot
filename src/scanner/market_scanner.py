@@ -40,6 +40,7 @@ class MarketScanner:
         self.news = NewsAggregator(
             newsapi_key=settings.newsapi_key,
             gnews_key=settings.gnews_api_key,
+            thenewsapi_key=settings.thenewsapi_key,
         )
         self.estimator = ProbabilityEstimator(
             api_key=settings.anthropic_api_key,

@@ -22,6 +22,7 @@ class Settings(BaseSettings):
         "polymarket_private_key",
         "newsapi_key",
         "gnews_api_key",
+        "thenewsapi_key",
         "anthropic_api_key",
         "anthropic_model",
         "telegram_bot_token",
@@ -42,6 +43,7 @@ class Settings(BaseSettings):
     # --- News ---
     newsapi_key: str = Field(default="", description="NewsAPI.org key")
     gnews_api_key: str = Field(default="", description="GNews API key (backup)")
+    thenewsapi_key: str = Field(default="", description="TheNewsAPI.com token (primary)")
 
     # --- LLM ---
     anthropic_api_key: str = Field(default="", description="Anthropic Claude API key")
