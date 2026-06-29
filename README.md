@@ -49,7 +49,7 @@ A position is only opened when **all** of these hold:
 
 | Filter | Rule | Why |
 |---|---|---|
-| Liquidity | 24h volume ≥ **$50,000** | Liquid markets gap less, so stops behave |
+| Liquidity | 24h volume ≥ **$25,000** | Liquid markets gap less, so stops behave |
 | Resolution buffer | Resolves **≥ 7 days** out | Avoids resolution-driven price *jumps* that blow through stops |
 | One bet per market | Never re-enter a market already traded | Prevents piling into one volatile question |
 | Price range | Priced between 10% and 90% | Avoids junk long shots |
@@ -226,7 +226,7 @@ Required environment variables:
 | `max_hold_hours` | 36 | Hard cap — close any position after this long |
 | `min_hours_to_resolution` | 168 | Skip markets resolving within 7 days (gap protection) |
 | `one_bet_per_market` | true | Never re-enter a market already traded |
-| `min_volume_usd` | 50,000 | Minimum 24h volume (liquidity floor) |
+| `min_volume_usd` | 25,000 | Minimum 24h volume (liquidity floor) |
 | `max_markets_per_scan` | 30 | Markets analysed per scan |
 | `min_win_probability` | 0.55 | Minimum expected win rate for the chosen side |
 | `min_ev_threshold` | 0.05 | Minimum EV to open a position |

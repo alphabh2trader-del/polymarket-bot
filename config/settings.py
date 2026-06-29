@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     stop_loss_pct: float = 0.05            # cut a position once it's down this % from entry (5%)
     max_markets_per_scan: int = 30
     min_ev_threshold: float = 0.05         # 5% minimum EV
-    min_volume_usd: float = 50_000.0       # Min market volume — higher = more liquid = smaller price gaps
+    min_volume_usd: float = 25_000.0       # Min market volume (liquidity floor). 25k keeps the tradeable pool wide enough; gap protection comes mainly from min_hours_to_resolution.
     min_implied_prob: float = 0.10         # Skip markets priced below 10% or above 90%
     min_win_probability: float = 0.55      # Only bet sides we expect to win >=55% of the time
     max_edge: float = 0.35                 # Reject implausibly large disagreements with the market
