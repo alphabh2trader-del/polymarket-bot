@@ -173,6 +173,16 @@ class MarketScanner:
             reverse=True,
         )
 
+        # One bet per market: drop any market the bot has EVER traded so it can't
+        # re-enter the same question (prevents piling into one volatile market).
+        if settings.one_bet_per_market:
+            with get_session() as session:
+                traded = {r[0] for r in session.query(Prediction.condition_id).distinct().all()}
+            before = len(all_eligible)
+            all_eligible = [m for m in all_eligible if m.condition_id not in traded]
+            if before != len(all_eligible):
+                log.info(f"Skipped {before - len(all_eligible)} already-traded markets (one-bet-per-market)")
+
         # Rotate through the eligible pool so each hourly scan covers a fresh
         # batch instead of re-analysing the same top markets every time.
         cap = settings.max_markets_per_scan
@@ -698,17 +708,22 @@ class MarketScanner:
         ev_result: EVResult,
         estimate: ProbabilityEstimate,
     ) -> Optional[int]:
-        """Save a prediction record (deduped by condition_id + predicted_side while PENDING)."""
+        """Save a prediction record.
+
+        Dedup: with one_bet_per_market, never create a second prediction for a
+        market the bot has already traded (any side, any outcome). Otherwise fall
+        back to the old rule (one PENDING prediction per market+side).
+        """
+        from config.settings import settings as _settings
         with get_session() as session:
-            existing = (
-                session.query(Prediction)
-                .filter_by(
-                    condition_id=condition_id,
+            q = session.query(Prediction).filter_by(condition_id=condition_id)
+            if _settings.one_bet_per_market:
+                existing = q.first()
+            else:
+                existing = q.filter_by(
                     predicted_side=ev_result.side,
                     outcome="PENDING",
-                )
-                .first()
-            )
+                ).first()
             if existing:
                 return existing.id
 

@@ -70,17 +70,18 @@ class Settings(BaseSettings):
 
     # --- Scanner ---
     scan_interval_minutes: int = 60        # how often Claude scans for new edges (costs money)
-    position_check_minutes: int = 5        # how often open positions are priced (free Polymarket calls)
+    position_check_minutes: int = 1        # how often open positions are priced (free Polymarket calls)
     profit_hold_hours: int = 24            # close a position in profit after this many hours
     max_hold_hours: int = 36               # hard cap: force-close ANY open position after this many hours
     stop_loss_pct: float = 0.05            # cut a position once it's down this % from entry (5%)
     max_markets_per_scan: int = 30
     min_ev_threshold: float = 0.05         # 5% minimum EV
-    min_volume_usd: float = 25_000.0       # Min market volume to consider
+    min_volume_usd: float = 50_000.0       # Min market volume — higher = more liquid = smaller price gaps
     min_implied_prob: float = 0.10         # Skip markets priced below 10% or above 90%
     min_win_probability: float = 0.55      # Only bet sides we expect to win >=55% of the time
     max_edge: float = 0.35                 # Reject implausibly large disagreements with the market
-    min_hours_to_resolution: int = 48      # Skip markets resolving too soon
+    min_hours_to_resolution: int = 168     # Skip markets resolving within 7 days (avoids resolution-driven price jumps)
+    one_bet_per_market: bool = True        # Never re-enter a market the bot has already traded
 
     # --- Anomaly Detection ---
     volume_spike_multiplier: float = 3.0   # 3× average = spike
