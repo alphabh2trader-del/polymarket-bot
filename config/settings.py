@@ -72,8 +72,9 @@ class Settings(BaseSettings):
     scan_interval_minutes: int = 60        # how often Claude scans for new edges (costs money)
     position_check_minutes: int = 1        # how often open positions are priced (free Polymarket calls)
     profit_hold_hours: int = 24            # close a position in profit after this many hours
-    max_hold_hours: int = 36               # hard cap: force-close ANY open position after this many hours
+    max_hold_hours: int = 24               # hard cap: force-close ANY open position after this many hours
     stop_loss_pct: float = 0.05            # cut a position once it's down this % from entry (5%)
+    breakeven_band_pct: float = 0.02       # a time/thesis exit within +/- this % of entry is BREAKEVEN (not win/loss)
     max_markets_per_scan: int = 30
     min_ev_threshold: float = 0.05         # 5% minimum EV
     min_volume_usd: float = 25_000.0       # Min market volume (liquidity floor). 25k keeps the tradeable pool wide enough; gap protection comes mainly from min_hours_to_resolution.

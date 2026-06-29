@@ -131,7 +131,7 @@ def get_last_scan() -> dict | None:
 
 
 @st.cache_data(ttl=30)
-def get_stats() -> tuple[int, int, int]:
+def get_stats() -> tuple[int, int, int, int]:
     with get_session() as session:
         from sqlalchemy import func
         rows = (
@@ -140,7 +140,14 @@ def get_stats() -> tuple[int, int, int]:
             .all()
         )
         counts = {r[0]: r[1] for r in rows}
-    return counts.get("WIN", 0), counts.get("LOSS", 0), counts.get("PENDING", 0)
+    # Wins, Losses, Pending, Breakeven. Breakeven (price barely moved) is shown
+    # separately and excluded from the win-rate donut — it isn't a win or a loss.
+    return (
+        counts.get("WIN", 0),
+        counts.get("LOSS", 0),
+        counts.get("PENDING", 0),
+        counts.get("BREAKEVEN", 0),
+    )
 
 
 @st.cache_data(ttl=30)
@@ -243,8 +250,8 @@ with st.sidebar:
 # Shared stats                                                         #
 # ------------------------------------------------------------------ #
 
-wins, losses, pending = get_stats()
-total_resolved = wins + losses
+wins, losses, pending, breakeven = get_stats()
+total_resolved = wins + losses   # breakeven excluded — it's neither a win nor a loss
 win_rate = wins / total_resolved if total_resolved > 0 else None
 
 
@@ -316,10 +323,11 @@ if page == "🏠  Home":
     _, mid, _ = st.columns([1, 2, 1])
     with mid:
         st.plotly_chart(_donut_chart(), use_container_width=True)
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("Wins", wins)
         c2.metric("Losses", losses)
-        c3.metric("Pending", pending)
+        c3.metric("Breakeven", breakeven, help="Price barely moved (±2%). Not counted as a win or loss, and excluded from the win-rate donut.")
+        c4.metric("Pending", pending)
 
     st.divider()
     st.subheader("Performance")

@@ -126,7 +126,7 @@ class Prediction(Base):
     confidence = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     resolved_at = Column(DateTime, nullable=True)
-    outcome = Column(String, default="PENDING")       # PENDING / WIN / LOSS
+    outcome = Column(String, default="PENDING")       # PENDING / WIN / LOSS / BREAKEVEN / VOID
     resolution_value = Column(String, nullable=True)  # YES / NO if the market resolved
 
     # --- trade-the-price tracking ---

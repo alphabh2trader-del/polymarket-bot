@@ -87,9 +87,10 @@ class ResolutionChecker:
                 elif current <= p["stop"]:
                     outcome, exit_price, exit_reason = "LOSS", current, "STOP_LOSS"
                 elif self._time_exit_due(p["created_at"], current, p["entry"]):
-                    # Time close: 24h if in profit, 36h hard cap otherwise. Close at the
-                    # current price. WIN if we're in profit, else LOSS.
-                    outcome = "WIN" if current > p["entry"] else "LOSS"
+                    # Time close (24h). Close at the current price. If the price
+                    # barely moved (within the breakeven band) the trade didn't
+                    # work either way -> BREAKEVEN (not counted as win or loss).
+                    outcome = self._classify(current, p["entry"])
                     exit_price, exit_reason = current, "TIME_EXIT"
             else:
                 # Not in the active set -> market is likely closed; settle on outcome.
@@ -121,7 +122,7 @@ class ResolutionChecker:
                 did_recheck = True
                 rechecks_done += 1
                 if self._thesis_broken(p, current):
-                    outcome = "WIN" if current > p["entry"] else "LOSS"
+                    outcome = self._classify(current, p["entry"])
                     exit_price, exit_reason = current, "THESIS_EXIT"
 
             # Safety net: any close at $0 doesn't count.
@@ -152,7 +153,7 @@ class ResolutionChecker:
 
             if outcome:
                 ret = (exit_price - p["entry"]) / p["entry"] if p["entry"] else 0.0
-                # VOID positions don't count toward win/loss and get no alert.
+                # VOID + BREAKEVEN don't count toward win/loss and get no alert.
                 if outcome in ("WIN", "LOSS"):
                     self.notifier.send_outcome(
                         question=p["question"],
@@ -199,6 +200,15 @@ class ResolutionChecker:
         if age_hours >= settings.max_hold_hours:
             return True
         return False
+
+    @staticmethod
+    def _classify(current: float, entry: float) -> str:
+        """WIN / LOSS / BREAKEVEN for a time- or thesis-exit, based on how far
+        the price moved from entry. Within +/- breakeven_band_pct = BREAKEVEN."""
+        ret = (current - entry) / entry if entry else 0.0
+        if abs(ret) <= settings.breakeven_band_pct:
+            return "BREAKEVEN"
+        return "WIN" if ret > 0 else "LOSS"
 
     @staticmethod
     def _recheck_cooldown_ok(last) -> bool:
