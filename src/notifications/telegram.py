@@ -98,6 +98,7 @@ class TelegramNotifier:
             "TARGET_HIT": "🎯 Hit target — sold for profit",
             "STOP_LOSS": "🛑 Stopped out — cut the loss",
             "TIME_EXIT": "⏱ Closed on time limit",
+            "THESIS_EXIT": "📰 Thesis changed — news no longer supports it",
             "RESOLVED": "🏁 Market resolved",
         }.get(exit_reason, exit_reason)
         header = "✅ WIN" if outcome == "WIN" else "❌ LOSS"

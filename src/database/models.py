@@ -132,7 +132,8 @@ class Prediction(Base):
     # --- trade-the-price tracking ---
     current_price = Column(Float, nullable=True)      # latest price of the chosen side
     exit_price = Column(Float, nullable=True)         # price the position closed at
-    exit_reason = Column(String, nullable=True)       # TARGET_HIT / STOP_LOSS / RESOLVED
+    exit_reason = Column(String, nullable=True)       # TARGET_HIT / STOP_LOSS / TIME_EXIT / THESIS_EXIT / RESOLVED
+    last_recheck_at = Column(DateTime, nullable=True) # last time the thesis was re-evaluated by Claude
 
     market = relationship("Market", back_populates="predictions")
     opportunity = relationship("Opportunity", back_populates="prediction")

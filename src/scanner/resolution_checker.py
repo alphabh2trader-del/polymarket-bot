@@ -16,6 +16,7 @@ import json as _json
 import time
 from datetime import datetime, timezone
 
+from config.settings import settings
 from src.api.polymarket import PolymarketClient
 from src.database.db import get_session
 from src.database.models import Prediction
@@ -29,9 +30,14 @@ _GAMMA_HOST = "https://gamma-api.polymarket.com"
 
 
 class ResolutionChecker:
-    def __init__(self, poly: PolymarketClient, notifier: TelegramNotifier):
+    def __init__(self, poly: PolymarketClient, notifier: TelegramNotifier,
+                 estimator=None, news=None):
         self.poly = poly
         self.notifier = notifier
+        # Optional — enable the news-driven thesis re-check. If absent, the
+        # re-check is silently skipped (price-only behaviour).
+        self.estimator = estimator
+        self.news = news
 
     def check_pending(self) -> tuple[int, int]:
         """
@@ -57,6 +63,7 @@ class ResolutionChecker:
                     "ev": p.ev,
                     "confidence": p.confidence,
                     "created_at": p.created_at,
+                    "last_recheck": p.last_recheck_at,
                 }
                 for p in rows
             ]
@@ -65,6 +72,7 @@ class ResolutionChecker:
             return 0, 0
 
         wins = losses = 0
+        rechecks_done = 0
 
         for p in pending:
             current = self._current_side_price(p["condition_id"], p["side"])
@@ -96,6 +104,26 @@ class ResolutionChecker:
                     exit_value = 1.0 if resolution == p["side"] else 0.0
                     outcome, exit_price, exit_reason = "VOID", exit_value, "RESOLVED"
 
+            # Thesis re-check: position still open but moving against us. Re-read the
+            # news and ask Claude again; if the edge is gone, close now (THESIS_EXIT)
+            # instead of waiting for the stop. Triggered + capped so it barely adds
+            # to the Claude bill.
+            did_recheck = False
+            if (
+                outcome is None
+                and current is not None
+                and self.estimator is not None
+                and settings.thesis_recheck_enabled
+                and rechecks_done < settings.recheck_max_per_sweep
+                and current <= p["entry"] * (1 - settings.recheck_trigger_pct)
+                and self._recheck_cooldown_ok(p["last_recheck"])
+            ):
+                did_recheck = True
+                rechecks_done += 1
+                if self._thesis_broken(p, current):
+                    outcome = "WIN" if current > p["entry"] else "LOSS"
+                    exit_price, exit_reason = current, "THESIS_EXIT"
+
             # Safety net: any close at $0 doesn't count.
             if outcome in ("WIN", "LOSS") and exit_price is not None and exit_price <= 0.0:
                 outcome = "VOID"
@@ -106,6 +134,8 @@ class ResolutionChecker:
                     continue
                 if current is not None:
                     pred.current_price = round(current, 4)
+                if did_recheck:
+                    pred.last_recheck_at = datetime.now(timezone.utc)
                 if outcome:
                     pred.outcome = outcome
                     pred.exit_price = round(exit_price, 4)
@@ -169,6 +199,77 @@ class ResolutionChecker:
         if age_hours >= settings.max_hold_hours:
             return True
         return False
+
+    @staticmethod
+    def _recheck_cooldown_ok(last) -> bool:
+        """True if the position hasn't been re-checked within the cooldown window."""
+        if last is None:
+            return True
+        last_utc = last if last.tzinfo else last.replace(tzinfo=timezone.utc)
+        age_h = (datetime.now(timezone.utc) - last_utc).total_seconds() / 3600
+        return age_h >= settings.recheck_cooldown_hours
+
+    def _get_market(self, condition_id: str):
+        """Fetch the active market dict (or None) from the Gamma API."""
+        try:
+            data = self.poly._get_gamma("/markets", params={"condition_ids": condition_id})
+            if not data:
+                return None
+            return data[0] if isinstance(data, list) else data
+        except Exception as exc:
+            log.debug(f"Cannot fetch market {condition_id}: {exc}")
+            return None
+
+    def _thesis_broken(self, p: dict, current: float) -> bool:
+        """
+        Re-read the news and re-run Claude on an open position. The thesis is
+        "broken" when Claude no longer values our side above what we paid (entry)
+        — i.e. the reason for the trade is gone. On any error we return False so a
+        transient failure never force-closes a position.
+        """
+        if self.estimator is None:
+            return False
+        try:
+            market = self._get_market(p["condition_id"])
+            if not market:
+                return False
+            raw = market.get("outcomePrices", "")
+            prices = _json.loads(raw) if isinstance(raw, str) else raw
+            yes_price = float(prices[0]) if prices else current
+            no_price = (
+                float(prices[1]) if prices and len(prices) > 1 else round(1.0 - yes_price, 4)
+            )
+            description = market.get("description", "") or ""
+            end = market.get("endDate") or market.get("end_date_iso") or "Unknown"
+
+            articles = []
+            news_text = ""
+            if self.news is not None:
+                query = p["question"].replace("?", "").strip()[:80]
+                articles = self.news.search_news(query, days_back=7)
+                news_text = self.news.format_for_prompt(articles)
+
+            est = self.estimator.estimate(
+                question=p["question"],
+                description=description,
+                yes_price=yes_price,
+                no_price=no_price,
+                resolution_date=str(end)[:10],
+                news_text=news_text,
+            )
+            new_side_prob = (
+                est.probability if p["side"] == "YES" else round(1.0 - est.probability, 4)
+            )
+            broken = new_side_prob <= p["entry"]
+            log.info(
+                f"THESIS RECHECK [{'BROKEN' if broken else 'intact'}] "
+                f"{p['question'][:50]} | side={p['side']} entry={p['entry']:.2f} "
+                f"new_fair={new_side_prob:.2f}"
+            )
+            return broken
+        except Exception as exc:
+            log.warning(f"Thesis recheck failed for {p['condition_id']}: {exc}")
+            return False
 
     def _current_side_price(self, condition_id: str, side: str) -> float | None:
         """

@@ -83,6 +83,16 @@ class Settings(BaseSettings):
     min_hours_to_resolution: int = 168     # Skip markets resolving within 7 days (avoids resolution-driven price jumps)
     one_bet_per_market: bool = True        # Never re-enter a market the bot has already traded
 
+    # --- Thesis re-check (news-driven exit) ---
+    # When an open position moves against us, re-read the news and ask Claude
+    # again. If Claude no longer sees value above our entry, the reason for the
+    # trade is gone -> close it (THESIS_EXIT) instead of waiting for the stop.
+    # Triggered (not on a timer) so it barely adds to the Claude bill.
+    thesis_recheck_enabled: bool = True
+    recheck_trigger_pct: float = 0.03      # re-check when a position is down >= this % from entry
+    recheck_cooldown_hours: float = 2.0    # don't re-check the same position more than once per this many hours
+    recheck_max_per_sweep: int = 5         # cap Claude re-checks per position sweep (cost guard)
+
     # --- Anomaly Detection ---
     volume_spike_multiplier: float = 3.0   # 3× average = spike
     price_move_threshold: float = 0.10     # 10% price move = anomaly

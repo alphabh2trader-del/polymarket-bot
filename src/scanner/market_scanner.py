@@ -65,6 +65,8 @@ class MarketScanner:
         self.resolver = ResolutionChecker(
             poly=self.poly,
             notifier=self.telegram,
+            estimator=self.estimator,
+            news=self.news,
         )
         self._scheduler = BlockingScheduler(timezone=settings.timezone)
         self._scan_offset = 0  # rotates through eligible markets each scan
