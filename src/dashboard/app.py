@@ -151,6 +151,31 @@ def get_stats() -> tuple[int, int, int, int]:
 
 
 @st.cache_data(ttl=30)
+def get_bet_activity() -> dict | None:
+    """How many bets the bot opens per day (by Eastern date it was created)."""
+    from collections import Counter
+    from datetime import datetime as _dt
+    with get_session() as session:
+        rows = session.query(Prediction.created_at).all()
+    dates = []
+    for (cr,) in rows:
+        if cr is None:
+            continue
+        d = cr.replace(tzinfo=_utc.utc).astimezone(_TZ).date() if _TZ else cr.date()
+        dates.append(d)
+    if not dates:
+        return None
+    cnt = Counter(dates)
+    today = (_dt.now(_TZ).date() if _TZ else _dt.utcnow().date())
+    return {
+        "total": len(dates),
+        "days": len(cnt),
+        "avg_per_day": len(dates) / len(cnt),
+        "today": cnt.get(today, 0),
+    }
+
+
+@st.cache_data(ttl=30)
 def get_performance() -> dict | None:
     """
     Performance over every closed WIN/LOSS bet (VOID/PENDING ignored).
@@ -360,6 +385,13 @@ if page == "🏠  Home":
             f"Based on {perf['n']} closed bets over {perf['days']} day(s) "
             f"(~{perf['per_day']:.1f} per day)."
         )
+
+    act = get_bet_activity()
+    if act:
+        b1, b2 = st.columns(2)
+        b1.metric("Avg Bets Opened / Day", f"{act['avg_per_day']:.1f}",
+                  help=f"{act['total']} bets opened over {act['days']} day(s).")
+        b2.metric("Bets Opened Today", act["today"], help="Positions opened so far today (Eastern).")
 
     st.divider()
     st.subheader("Live Positions")
