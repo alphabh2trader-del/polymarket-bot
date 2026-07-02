@@ -186,6 +186,43 @@ def get_bet_activity() -> dict | None:
 
 
 @st.cache_data(ttl=30)
+def get_today_capital_return() -> dict | None:
+    """
+    Every bet OPENED today (Eastern date), at its current mark-to-market return —
+    exit price if it already closed, live price if it's still open. Unlike
+    get_performance() (which only counts fully closed WIN/LOSS bets, all-time),
+    this deliberately includes still-open positions, since most of a given day's
+    bets won't have resolved yet under the 24h hold — otherwise "today" would
+    almost always show zero data. VOID closes are excluded (resolution artifact,
+    not a real price move); BREAKEVEN/PENDING are included at their real value.
+    """
+    from datetime import datetime as _dt
+    today = _dt.now(_TZ).date() if _TZ else _dt.utcnow().date()
+    returns: list[float] = []
+    with get_session() as session:
+        rows = session.query(Prediction).all()
+        for p in rows:
+            if p.created_at is None:
+                continue
+            d = (
+                p.created_at.replace(tzinfo=_utc.utc).astimezone(_TZ).date()
+                if _TZ else p.created_at.date()
+            )
+            if d != today or p.outcome == "VOID":
+                continue
+            entry = p.implied_prob
+            if not entry:
+                continue
+            price = p.exit_price if p.exit_price is not None else p.current_price
+            if price is None:
+                continue
+            returns.append((price - entry) / entry)
+    if not returns:
+        return None
+    return {"n": len(returns), "avg_return": sum(returns) / len(returns)}
+
+
+@st.cache_data(ttl=30)
 def get_performance() -> dict | None:
     """
     Performance over every closed WIN/LOSS bet (VOID/PENDING ignored).
@@ -421,6 +458,20 @@ if page == "🏠  Home":
                 )
             else:
                 st.info("Not enough closed bets yet.")
+
+        today_cap = get_today_capital_return()
+        if today_cap:
+            today_dollar = capital * today_cap["avg_return"]
+            st.metric(
+                f"Today, on ${capital:,.0f} split across {today_cap['n']} bet(s) opened today",
+                f"${today_dollar:+,.2f}",
+                f"{today_cap['avg_return']:+.1%}",
+                help="Same idea as above, but only bets opened today (since midnight Eastern), at their "
+                     "current value right now — still-open positions count at their live price, closed "
+                     "ones at their exit price. Resets to $0 every midnight Eastern.",
+            )
+        else:
+            st.caption("No bets opened yet today.")
 
         if perf.get("net_covered"):
             st.caption(
