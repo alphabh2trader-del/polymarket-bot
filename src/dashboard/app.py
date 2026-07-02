@@ -316,13 +316,11 @@ def get_performance() -> dict | None:
 
     first = bets[0]["created"]
     days = max((_dt.utcnow() - first).days, 1)
-    n = len(all_returns)
 
     return {
         "total_profit": total_profit,
         "total_profit_net": total_profit_net,
         "avg_profit_bet": avg_profit_bet,
-        "avg_profit_bet_net": total_profit_net / 100.0 / n if n else None,
         "avg_profit_day": avg_profit_day,
         "net_covered": net_covered,
         "days": days,
@@ -471,89 +469,92 @@ if page == "🏠  Home":
             f"(~{perf['per_day']:.1f} per day)."
         )
 
-        st.markdown("##### Return on your capital")
-        st.caption("Each box below has its own bankroll amount — change any one without affecting the others.")
+    # The three boxes below don't all need perf (Today / Close-everything-now
+    # include open positions and have data even with zero closed bets) so they
+    # render unconditionally rather than being hidden behind "No closed bets yet".
+    st.markdown("##### Return on your capital")
+    st.caption("Each box below has its own bankroll amount — change any one without affecting the others.")
 
-        # 1. All-time, closed bets only (realized P&L)
-        cap_col, result_col = st.columns([1, 2])
-        with cap_col:
-            capital = st.number_input(
-                "Starting capital ($) — all-time", min_value=100, value=1000, step=100,
-                key="capital_alltime",
-                help="Hypothetical bankroll, split equally across every CLOSED bet, all-time.",
-            )
-        with result_col:
-            if perf["avg_profit_bet"] is not None:
-                capital_profit = capital * perf["avg_profit_bet"]
-                st.metric(
-                    f"On ${capital:,.0f} split across {perf['n']} closed bets",
-                    f"${capital_profit:+,.2f}",
-                    f"{perf['avg_profit_bet']:+.1%}",
-                    help="Same as Avg Profit/Bet, just shown in dollars. Only counts bets that have "
-                         "already resolved — open positions aren't included.",
-                )
-            else:
-                st.info("Not enough closed bets yet.")
-
-        # 2. Today's bets only, mark-to-market (open positions count at live price)
-        cap_col2, result_col2 = st.columns([1, 2])
-        with cap_col2:
-            capital_today = st.number_input(
-                "Starting capital ($) — today", min_value=100, value=1000, step=100,
-                key="capital_today",
-                help="Hypothetical bankroll, split equally across only the bets opened today.",
-            )
-        with result_col2:
-            today_cap = get_today_capital_return()
-            if today_cap:
-                today_dollar = capital_today * today_cap["avg_return"]
-                st.metric(
-                    f"Today, on ${capital_today:,.0f} split across {today_cap['n']} bet(s) opened today",
-                    f"${today_dollar:+,.2f}",
-                    f"{today_cap['avg_return']:+.1%}",
-                    help="Only bets opened today (since midnight Eastern), at their current value right "
-                         "now — still-open positions count at their live price, closed ones at their exit "
-                         "price. Resets to $0 every midnight Eastern.",
-                )
-            else:
-                st.caption("No bets opened yet today.")
-
-        # 3. Every bet ever, mark-to-market right now (realized + unrealized)
-        cap_col3, result_col3 = st.columns([1, 2])
-        with cap_col3:
-            capital_now = st.number_input(
-                "Starting capital ($) — close everything now", min_value=100, value=1000, step=100,
-                key="capital_close_now",
-                help="Hypothetical bankroll, split equally across every bet ever opened.",
-            )
-        with result_col3:
-            close_now = get_close_now_capital_return()
-            if close_now:
-                close_now_dollar = capital_now * close_now["avg_return"]
-                st.metric(
-                    f"If you closed everything right now, on ${capital_now:,.0f} split across {close_now['n']} bets",
-                    f"${close_now_dollar:+,.2f}",
-                    f"{close_now['avg_return']:+.1%}",
-                    help="Every bet ever opened (all-time, not just closed ones), each valued as if you "
-                         "closed it this instant — already-closed bets at their exit price, still-open "
-                         "positions at their current live price. This is realized + unrealized P&L combined.",
-                )
-            else:
-                st.info("Not enough bets yet.")
-
-        if perf.get("net_covered"):
-            st.caption(
-                f"📉 Estimated net of bid/ask spread: **${perf['total_profit_net']:+,.0f}** "
-                f"(vs ${perf['total_profit']:+,.0f} gross at mid-price). A real order buys at "
-                f"the ask and sells at the bid, giving up ~one spread round-trip. Spread was "
-                f"recorded on {perf['net_covered']} of {perf['n']} closed bets; older bets "
-                f"predate spread capture and are shown at their mid-price fill."
+    # 1. All-time, closed bets only (realized P&L) — the only box that needs perf
+    cap_col, result_col = st.columns([1, 2])
+    with cap_col:
+        capital = st.number_input(
+            "Starting capital ($) — all-time", min_value=100, value=1000, step=100,
+            key="capital_alltime",
+            help="Hypothetical bankroll, split equally across every CLOSED bet, all-time.",
+        )
+    with result_col:
+        if perf and perf["avg_profit_bet"] is not None:
+            capital_profit = capital * perf["avg_profit_bet"]
+            st.metric(
+                f"On ${capital:,.0f} split across {perf['n']} closed bets",
+                f"${capital_profit:+,.2f}",
+                f"{perf['avg_profit_bet']:+.1%}",
+                help="Same as Avg Profit/Bet, just shown in dollars. Only counts bets that have "
+                     "already resolved — open positions aren't included.",
             )
         else:
-            st.caption(
-                "📉 Net-of-spread estimate will appear once positions opened after this "
-                "update start closing (entry spread is now recorded at open)."
+            st.info("Not enough closed bets yet.")
+
+    # 2. Today's bets only, mark-to-market (open positions count at live price)
+    cap_col2, result_col2 = st.columns([1, 2])
+    with cap_col2:
+        capital_today = st.number_input(
+            "Starting capital ($) — today", min_value=100, value=1000, step=100,
+            key="capital_today",
+            help="Hypothetical bankroll, split equally across only the bets opened today.",
+        )
+    with result_col2:
+        today_cap = get_today_capital_return()
+        if today_cap:
+            today_dollar = capital_today * today_cap["avg_return"]
+            st.metric(
+                f"Today, on ${capital_today:,.0f} split across {today_cap['n']} bet(s) opened today",
+                f"${today_dollar:+,.2f}",
+                f"{today_cap['avg_return']:+.1%}",
+                help="Only bets opened today (since midnight Eastern), at their current value right "
+                     "now — still-open positions count at their live price, closed ones at their exit "
+                     "price. Resets to $0 every midnight Eastern.",
             )
+        else:
+            st.caption("No bets opened yet today.")
+
+    # 3. Every bet ever, mark-to-market right now (realized + unrealized)
+    cap_col3, result_col3 = st.columns([1, 2])
+    with cap_col3:
+        capital_now = st.number_input(
+            "Starting capital ($) — close everything now", min_value=100, value=1000, step=100,
+            key="capital_close_now",
+            help="Hypothetical bankroll, split equally across every bet ever opened.",
+        )
+    with result_col3:
+        close_now = get_close_now_capital_return()
+        if close_now:
+            close_now_dollar = capital_now * close_now["avg_return"]
+            st.metric(
+                f"If you closed everything right now, on ${capital_now:,.0f} split across {close_now['n']} bets",
+                f"${close_now_dollar:+,.2f}",
+                f"{close_now['avg_return']:+.1%}",
+                help="Every bet ever opened (all-time, not just closed ones), each valued as if you "
+                     "closed it this instant — already-closed bets at their exit price, still-open "
+                     "positions at their current live price. This is realized + unrealized P&L combined.",
+            )
+        else:
+            st.info("Not enough bets yet.")
+
+    if perf and perf.get("net_covered"):
+        st.caption(
+            f"📉 Estimated net of bid/ask spread: **${perf['total_profit_net']:+,.0f}** "
+            f"(vs ${perf['total_profit']:+,.0f} gross at mid-price). A real order buys at "
+            f"the ask and sells at the bid, giving up ~one spread round-trip. Spread was "
+            f"recorded on {perf['net_covered']} of {perf['n']} closed bets; older bets "
+            f"predate spread capture and are shown at their mid-price fill."
+        )
+    elif perf:
+        st.caption(
+            "📉 Net-of-spread estimate will appear once positions opened after this "
+            "update start closing (entry spread is now recorded at open)."
+        )
 
     act = get_bet_activity()
     if act:

@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     max_edge: float = 0.35                 # Reject implausibly large disagreements with the market
     min_hours_to_resolution: int = 168     # Skip markets resolving within 7 days (avoids resolution-driven price jumps)
     one_bet_per_market: bool = True        # Only one OPEN position per market; re-entry allowed after the cooldown below
-    reentry_cooldown_days: float = 7.0     # After a position on a market closes, wait this long before re-trading it (0 = never re-enter). Prevents the tradeable pool from draining to empty while still blocking rapid re-entry into one volatile market.
+    reentry_cooldown_days: float = 7.0     # After a position on a market closes, wait this long before re-trading it (0 = no cooldown, immediate re-entry allowed — NOT "never re-enter"; there's no setting for that short of one_bet_per_market's old behavior). Prevents the tradeable pool from draining to empty while still blocking rapid re-entry into one volatile market.
 
     # --- Thesis re-check (news-driven exit) ---
     # When an open position moves against us, re-read the news and ask Claude

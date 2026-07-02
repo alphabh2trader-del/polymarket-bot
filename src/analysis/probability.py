@@ -109,6 +109,17 @@ class ProbabilityEstimator:
                 raw = next(
                     (b.text for b in message.content if b.type == "text"), ""
                 ).strip()
+                if message.stop_reason == "max_tokens" and not raw:
+                    # Adaptive thinking used the whole budget before any text
+                    # block was written. Log this distinctly from a parse
+                    # failure below — same failure signature (empty estimate,
+                    # falls back to market price -> no opportunity found), but
+                    # a different cause, and worth knowing which one recurs.
+                    log.warning(
+                        f"Claude hit max_tokens before producing an answer "
+                        f"(attempt {attempt+1}/3) — thinking used the full "
+                        f"4000-token budget with no output"
+                    )
                 return self._parse_response(raw)
             except anthropic.RateLimitError:
                 wait = 20 * (attempt + 1)
