@@ -50,6 +50,11 @@ class RiskManager:
         self.min_liquidity_usd = min_liquidity_usd
         self.min_hours_to_resolution = min_hours_to_resolution
         self.min_volume_usd = min_volume_usd
+        # The effective volume floor is the stricter of the two knobs. Previously
+        # check_trade only consulted min_volume_usd (default $5k) and ignored the
+        # min_liquidity_usd the scanner actually passes in — so the intended floor
+        # never took effect. Use the max so whichever is set/stricter applies.
+        self._volume_floor = max(min_volume_usd, min_liquidity_usd)
 
         self._daily_loss: float = 0.0
         self._daily_reset_date: datetime = datetime.utcnow().date()
@@ -71,6 +76,14 @@ class RiskManager:
         """
         Approve or reject a proposed trade.
         Returns RiskDecision with adjusted size if approved.
+
+        NOTE (go-live prerequisite): the daily-loss limit and per-category
+        exposure cap below only bind once record_trade_opened() and
+        record_trade_closed() are actually called on close/open. Nothing calls
+        them yet, so in the current paper mode those two limits are INERT — the
+        EV, volume, size-cap and resolution-buffer checks are the ones that
+        actually gate trades. Wire the counters (with persistence across
+        restarts) before trusting daily-loss / category limits with real money.
         """
         self._maybe_reset_daily_loss()
 
@@ -78,11 +91,11 @@ class RiskManager:
         if ev < min_ev:
             return RiskDecision(False, f"EV {ev:.1%} below minimum threshold {min_ev:.1%}")
 
-        # 2. Minimum liquidity
-        if volume_24h < self.min_volume_usd:
+        # 2. Minimum liquidity (stricter of min_volume_usd / min_liquidity_usd)
+        if volume_24h < self._volume_floor:
             return RiskDecision(
                 False,
-                f"24h volume ${volume_24h:,.0f} below minimum ${self.min_volume_usd:,.0f}",
+                f"24h volume ${volume_24h:,.0f} below minimum ${self._volume_floor:,.0f}",
             )
 
         # 3. Resolution date check

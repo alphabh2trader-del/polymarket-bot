@@ -187,6 +187,29 @@ class PolymarketClient:
             log.warning(f"Orderbook unavailable for {token_id}: {exc}")
             return {}
 
+    def get_best_bid_ask(self, token_id: str) -> tuple[float, float] | None:
+        """
+        Return (best_bid, best_ask) for a token, or None if unavailable.
+
+        The CLOB /book returns bids and asks as [{"price","size"}, ...]. Best bid
+        is the highest bid price, best ask the lowest ask price. Used to estimate
+        the spread a real order would cross (paper P&L assumes a mid-price fill).
+        """
+        try:
+            book = self.get_orderbook(token_id)
+            bids = book.get("bids") or []
+            asks = book.get("asks") or []
+            if not bids or not asks:
+                return None
+            best_bid = max(float(b["price"]) for b in bids)
+            best_ask = min(float(a["price"]) for a in asks)
+            if best_ask <= best_bid:   # crossed/degenerate book — ignore
+                return None
+            return best_bid, best_ask
+        except Exception as exc:
+            log.debug(f"Cannot read best bid/ask for {token_id}: {exc}")
+            return None
+
     # ------------------------------------------------------------------ #
     # Parsing helpers                                                      #
     # ------------------------------------------------------------------ #

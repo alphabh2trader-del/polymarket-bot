@@ -46,6 +46,20 @@ RSS_FEEDS = {
     "Reuters Business": "https://feeds.reuters.com/reuters/businessNews",
 }
 
+# Boilerplate words common to prediction-market questions. Stripped when building
+# a news search query so the search keys on the distinctive entities, not "will",
+# "before", etc. (a raw question sent verbatim is treated as an AND of every word
+# and usually returns nothing).
+QUERY_STOPWORDS = {
+    "will", "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "by",
+    "for", "be", "is", "are", "was", "were", "been", "being", "this", "that",
+    "these", "those", "before", "after", "during", "until", "than", "then",
+    "there", "their", "it", "its", "as", "with", "from", "into", "over", "under",
+    "any", "all", "more", "less", "most", "least", "have", "has", "had", "do",
+    "does", "did", "get", "gets", "make", "makes", "who", "what", "when", "where",
+    "which", "whether", "how", "many", "much", "another",
+}
+
 
 class NewsAggregator:
     def __init__(self, newsapi_key: str = "", gnews_key: str = "", thenewsapi_key: str = ""):
@@ -227,8 +241,19 @@ class NewsAggregator:
     # ------------------------------------------------------------------ #
 
     def _search_rss(self, query: str, days_back: int) -> list[Article]:
+        import re
         cutoff = datetime.utcnow() - timedelta(days=days_back)
-        query_words = set(query.lower().split())
+        # Only meaningful words count toward relevance. Requiring >=2 distinct
+        # whole-word matches stops generic headlines from matching on a single
+        # common word like "win" or "before" and crowding out real articles.
+        meaningful = {
+            w for w in query.lower().split()
+            if len(w) >= 4 and w not in QUERY_STOPWORDS
+        }
+        if not meaningful:
+            meaningful = {w for w in query.lower().split() if len(w) >= 4}
+        need = min(2, len(meaningful)) if meaningful else 1
+        patterns = [re.compile(rf"\b{re.escape(w)}\b") for w in meaningful]
         articles = []
 
         for source_name, feed_url in RSS_FEEDS.items():
@@ -239,8 +264,9 @@ class NewsAggregator:
                     summary = entry.get("summary", "")
                     combined = (title + " " + summary).lower()
 
-                    # Simple keyword relevance check
-                    if not any(w in combined for w in query_words if len(w) > 3):
+                    # Relevance: at least `need` distinct meaningful words present
+                    # as whole words (avoids "win" matching "winter").
+                    if sum(1 for p in patterns if p.search(combined)) < need:
                         continue
 
                     # Parse date
@@ -269,6 +295,36 @@ class NewsAggregator:
     # ------------------------------------------------------------------ #
     # Utility                                                              #
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def build_search_query(question: str, max_terms: int = 6) -> str:
+        """
+        Turn a market question into a focused news search query.
+
+        Keeps the distinctive terms — proper nouns (capitalized mid-sentence),
+        substantive words (len >= 5), and 4-digit years — and drops boilerplate
+        stopwords. A raw truncated question is a poor query: news APIs treat it as
+        an AND of every word and usually return nothing. Falls back to the trimmed
+        question if nothing distinctive survives.
+        """
+        import re
+        cleaned = question.replace("?", " ").strip()
+        # [^\W_] keeps unicode word chars (accented letters like é) but drops
+        # underscores, so names like "Québécois" survive intact.
+        tokens = re.findall(r"[^\W_]+", cleaned, re.UNICODE)
+        terms: list[str] = []
+        for i, tok in enumerate(tokens):
+            if tok.lower() in QUERY_STOPWORDS:
+                continue
+            is_proper = i > 0 and tok[0].isupper() and len(tok) >= 2
+            is_year = tok.isdigit() and len(tok) == 4
+            if is_proper or is_year or len(tok) >= 5:
+                terms.append(tok)
+            if len(terms) >= max_terms:
+                break
+        if not terms:
+            return cleaned[:80]
+        return " ".join(terms)
 
     @staticmethod
     def format_for_prompt(articles: list[Article], max_articles: int = 8) -> str:

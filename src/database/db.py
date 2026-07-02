@@ -18,6 +18,7 @@ _PREDICTION_NEW_COLUMNS = {
     "exit_price": "FLOAT",
     "exit_reason": "VARCHAR",
     "last_recheck_at": "TIMESTAMP",
+    "entry_spread": "FLOAT",
 }
 
 

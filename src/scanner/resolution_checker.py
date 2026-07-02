@@ -188,7 +188,7 @@ class ResolutionChecker:
         """
         Time-based close:
           - in profit (current > entry)  -> close after profit_hold_hours (24h)
-          - otherwise                    -> hold until the hard cap max_hold_hours (36h)
+          - otherwise                    -> hold until the hard cap max_hold_hours (24h)
         """
         if created_at is None:
             return False
@@ -255,7 +255,7 @@ class ResolutionChecker:
             articles = []
             news_text = ""
             if self.news is not None:
-                query = p["question"].replace("?", "").strip()[:80]
+                query = self.news.build_search_query(p["question"])
                 articles = self.news.search_news(query, days_back=7)
                 news_text = self.news.format_for_prompt(articles)
 

@@ -82,7 +82,8 @@ class Settings(BaseSettings):
     min_win_probability: float = 0.55      # Only bet sides we expect to win >=55% of the time
     max_edge: float = 0.35                 # Reject implausibly large disagreements with the market
     min_hours_to_resolution: int = 168     # Skip markets resolving within 7 days (avoids resolution-driven price jumps)
-    one_bet_per_market: bool = True        # Never re-enter a market the bot has already traded
+    one_bet_per_market: bool = True        # Only one OPEN position per market; re-entry allowed after the cooldown below
+    reentry_cooldown_days: float = 7.0     # After a position on a market closes, wait this long before re-trading it (0 = never re-enter). Prevents the tradeable pool from draining to empty while still blocking rapid re-entry into one volatile market.
 
     # --- Thesis re-check (news-driven exit) ---
     # When an open position moves against us, re-read the news and ask Claude

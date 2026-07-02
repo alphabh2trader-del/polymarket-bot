@@ -52,7 +52,7 @@ A position is only opened when **all** of these hold:
 |---|---|---|
 | Liquidity | 24h volume ≥ **$25,000** | Liquid markets gap less, so stops behave |
 | Resolution buffer | Resolves **≥ 7 days** out | Avoids resolution-driven price *jumps* that blow through stops |
-| One bet per market | Never re-enter a market already traded | Prevents piling into one volatile question |
+| One open position per market | Only one live bet per market; re-entry allowed after a **7-day cooldown** once it closes | Prevents piling into one volatile question, without permanently draining the tradeable pool |
 | Price range | Priced between 10% and 90% | Avoids junk long shots |
 | Minimum edge / EV | Expected value ≥ 5% | The gap is worth trading |
 | Win probability | Chosen side expected to win ≥ 55% | Targets a winning record |
@@ -95,9 +95,12 @@ The price-checking uses Polymarket's free public API, so positions are watched c
   |---|---|
   | **Entry / Target / Current** | Where you bought, your goal, the live price |
   | **Expected/$100** | Profit on a $100 stake **if it hits the target** (e.g. `+$9`) |
-  | **Live/$100** | Profit on $100 **if you cashed out right now** (e.g. `+$4` / `-$5`) |
+  | **Live/$100** | Profit on $100 **if you cashed out right now**, at the mid price (e.g. `+$4` / `-$5`) |
+  | **Net/$100** | Live profit **after the bid/ask spread** — the realistic fill a real order would get (buys at the ask, sells at the bid). The gap between Live and Net is the trading cost the mid-price paper number hides |
   | **Confidence** | Claude's confidence in the estimate (High / Medium / Low) |
   | **Outcome** | PENDING / WIN / LOSS |
+
+> **Realistic-fill P&L:** paper P&L assumes a mid-price fill, which real orders never get. At entry the bot now records the live bid/ask spread, so the dashboard can show a **net-of-spread** estimate alongside the raw paper number — the honest figure to weigh before going live.
 
 **Wins / Losses** — searchable tables of every closed position. Auto-refreshes every 30 seconds. All times shown in **Eastern (America/Toronto)**.
 
@@ -170,7 +173,8 @@ Railway Service 2 — Scanner (APScheduler)
 | `predicted_prob` | Target price (Claude's estimate) |
 | `current_price` | Latest live price (refreshed every minute) |
 | `exit_price` | Price the position closed at |
-| `outcome` | PENDING / WIN / LOSS / VOID |
+| `entry_spread` | Bid/ask spread captured at entry (for the net-of-spread P&L estimate) |
+| `outcome` | PENDING / WIN / LOSS / BREAKEVEN / VOID |
 | `exit_reason` | TARGET_HIT / STOP_LOSS / TIME_EXIT / THESIS_EXIT / RESOLVED |
 | `last_recheck_at` | When the thesis was last re-evaluated by Claude |
 
@@ -227,7 +231,8 @@ Required environment variables:
 | `max_hold_hours` | 24 | Hard cap — close any open position after this long, no matter what |
 | `breakeven_band_pct` | 0.005 | A time/thesis exit within this % of entry is BREAKEVEN, not a win or loss |
 | `min_hours_to_resolution` | 168 | Skip markets resolving within 7 days (gap protection) |
-| `one_bet_per_market` | true | Never re-enter a market already traded |
+| `one_bet_per_market` | true | Only one open position per market at a time |
+| `reentry_cooldown_days` | 7 | Wait this long after a position closes before re-trading that market (0 = never re-enter) |
 | `min_volume_usd` | 25,000 | Minimum 24h volume (liquidity floor) |
 | `max_markets_per_scan` | 30 | Markets analysed per scan |
 | `min_win_probability` | 0.55 | Minimum expected win rate for the chosen side |

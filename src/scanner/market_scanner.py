@@ -1,7 +1,7 @@
 """
-Main market scanner — runs every 15 minutes, analyses all active markets,
-persists opportunities and predictions to the database, checks resolutions,
-and fires Telegram reports on schedule.
+Main market scanner — on the configured scan interval it analyses a rotating
+batch of active markets, persists opportunities and predictions to the database,
+tracks open positions every minute, and fires Telegram reports on schedule.
 """
 
 from __future__ import annotations
@@ -79,8 +79,11 @@ class MarketScanner:
         """Start the scanning loop with all scheduled jobs."""
         log.info(f"Scanner starting — interval: {settings.scan_interval_minutes} minutes")
 
-        # Remove low-quality predictions saved before the quality filters existed
-        self._purge_low_quality_predictions()
+        # NOTE: startup purge of "low-quality" pending predictions is intentionally
+        # disabled. It deletes OPEN positions whenever the quality thresholds change,
+        # which silently drops live paper trades and distorts the sample. The strategy
+        # is locked for the evaluation window, so leave open positions untouched.
+        # self._purge_low_quality_predictions()
 
         # Backfill predictions from any opportunities saved before prediction tracking existed
         self._backfill_predictions()
@@ -175,15 +178,31 @@ class MarketScanner:
             reverse=True,
         )
 
-        # One bet per market: drop any market the bot has EVER traded so it can't
-        # re-enter the same question (prevents piling into one volatile market).
+        # One bet per market, with a re-entry cooldown. A market is blocked if it
+        # has an OPEN position, or one that closed within reentry_cooldown_days.
+        # Once the cooldown lapses the market can be traded again — otherwise the
+        # eligible pool drains permanently and the bot slowly starves.
         if settings.one_bet_per_market:
+            cutoff = datetime.utcnow() - timedelta(days=settings.reentry_cooldown_days)
             with get_session() as session:
-                traded = {r[0] for r in session.query(Prediction.condition_id).distinct().all()}
+                rows = session.query(
+                    Prediction.condition_id,
+                    Prediction.outcome,
+                    Prediction.resolved_at,
+                ).all()
+            blocked = set()
+            for cid, outcome, resolved_at in rows:
+                if outcome == "PENDING":
+                    blocked.add(cid)                       # never double-open
+                elif resolved_at is None or resolved_at >= cutoff:
+                    blocked.add(cid)                       # still within cooldown
             before = len(all_eligible)
-            all_eligible = [m for m in all_eligible if m.condition_id not in traded]
+            all_eligible = [m for m in all_eligible if m.condition_id not in blocked]
             if before != len(all_eligible):
-                log.info(f"Skipped {before - len(all_eligible)} already-traded markets (one-bet-per-market)")
+                log.info(
+                    f"Skipped {before - len(all_eligible)} markets "
+                    f"(open or within {settings.reentry_cooldown_days:g}d re-entry cooldown)"
+                )
 
         # Rotate through the eligible pool so each hourly scan covers a fresh
         # batch instead of re-analysing the same top markets every time.
@@ -272,7 +291,7 @@ class MarketScanner:
             for sig in anomalies:
                 log.info(f"ANOMALY [{sig.anomaly_type}] {market.question[:60]}: {sig.description}")
 
-        query = self._extract_search_query(market.question)
+        query = self.news.build_search_query(market.question)
         articles = self.news.search_news(query, days_back=7)
         news_text = NewsAggregator.format_for_prompt(articles)
 
@@ -353,7 +372,11 @@ class MarketScanner:
             articles=articles,
         )
 
-        # Record prediction (deduped — only one PENDING prediction per market+side)
+        # Capture the live bid/ask spread on the side we're entering, so the
+        # dashboard can show a realistic-fill P&L (paper P&L assumes a mid fill).
+        entry_spread = self._entry_spread(market, ev_result.side)
+
+        # Record prediction (deduped — one open position per market, re-entry after cooldown)
         self._save_prediction(
             db_market_id=db_market_id,
             opportunity_id=opp_id,
@@ -361,6 +384,7 @@ class MarketScanner:
             question=market.question,
             ev_result=ev_result,
             estimate=estimate,
+            entry_spread=entry_spread,
         )
 
         log.info(
@@ -709,18 +733,25 @@ class MarketScanner:
         question: str,
         ev_result: EVResult,
         estimate: ProbabilityEstimate,
+        entry_spread: Optional[float] = None,
     ) -> Optional[int]:
         """Save a prediction record.
 
-        Dedup: with one_bet_per_market, never create a second prediction for a
-        market the bot has already traded (any side, any outcome). Otherwise fall
-        back to the old rule (one PENDING prediction per market+side).
+        Dedup: with one_bet_per_market, block only if there is an OPEN position on
+        this market or one that closed within the re-entry cooldown; otherwise a
+        fresh bet is allowed. Without one_bet_per_market, fall back to the old rule
+        (one PENDING prediction per market+side).
         """
         from config.settings import settings as _settings
         with get_session() as session:
             q = session.query(Prediction).filter_by(condition_id=condition_id)
             if _settings.one_bet_per_market:
-                existing = q.first()
+                cutoff = datetime.utcnow() - timedelta(days=_settings.reentry_cooldown_days)
+                existing = q.filter(
+                    (Prediction.outcome == "PENDING")
+                    | (Prediction.resolved_at.is_(None))
+                    | (Prediction.resolved_at >= cutoff)
+                ).first()
             else:
                 existing = q.filter_by(
                     predicted_side=ev_result.side,
@@ -740,6 +771,7 @@ class MarketScanner:
                 current_price=ev_result.implied_prob,      # starts at entry
                 ev=ev_result.ev,
                 confidence=estimate.confidence,
+                entry_spread=entry_spread,
             )
             session.add(pred)
             session.flush()
@@ -749,7 +781,25 @@ class MarketScanner:
             )
             return pred.id
 
-    @staticmethod
-    def _extract_search_query(question: str) -> str:
-        q = question.replace("?", "").strip()
-        return q[:80] if len(q) > 80 else q
+    def _entry_spread(self, market: MarketData, side: str) -> Optional[float]:
+        """
+        Live bid/ask spread (absolute, e.g. 0.02) on the side being entered, or
+        None if the book can't be read. Never raises — a spread failure must not
+        block opening the paper position.
+        """
+        try:
+            if not market.tokens:
+                return None
+            idx = 0 if side == "YES" else 1
+            tok = market.tokens[idx] if len(market.tokens) > idx else market.tokens[0]
+            token_id = tok if isinstance(tok, str) else tok.get("token_id", "")
+            if not token_id:
+                return None
+            ba = self.poly.get_best_bid_ask(token_id)
+            if not ba:
+                return None
+            best_bid, best_ask = ba
+            return round(best_ask - best_bid, 4)
+        except Exception as exc:
+            log.debug(f"Entry spread unavailable for {market.condition_id}: {exc}")
+            return None

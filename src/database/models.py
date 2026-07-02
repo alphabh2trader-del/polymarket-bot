@@ -106,11 +106,12 @@ class Prediction(Base):
     Trade-the-price strategy:
       implied_prob   = entry price of the chosen side (price we "bought" at)
       predicted_prob = target price (Claude's estimate) -> take-profit level
-      stop price     = symmetric below entry = 2*implied_prob - predicted_prob
+      stop price     = fixed stop_loss_pct (5%) below entry
       current_price  = latest price of the chosen side (refreshed each scan)
       exit_price     = price we "sold" at when the position closed
-      outcome        = PENDING / WIN (hit target) / LOSS (hit stop or resolved against us)
-      exit_reason    = TARGET_HIT / STOP_LOSS / RESOLVED
+      entry_spread   = bid/ask spread at entry (for realistic-fill P&L estimate)
+      outcome        = PENDING / WIN / LOSS / BREAKEVEN / VOID
+      exit_reason    = TARGET_HIT / STOP_LOSS / TIME_EXIT / THESIS_EXIT / RESOLVED
     """
     __tablename__ = "predictions"
 
@@ -134,6 +135,7 @@ class Prediction(Base):
     exit_price = Column(Float, nullable=True)         # price the position closed at
     exit_reason = Column(String, nullable=True)       # TARGET_HIT / STOP_LOSS / TIME_EXIT / THESIS_EXIT / RESOLVED
     last_recheck_at = Column(DateTime, nullable=True) # last time the thesis was re-evaluated by Claude
+    entry_spread = Column(Float, nullable=True)       # bid/ask spread at entry (absolute, e.g. 0.02 = 2c) for realistic-fill P&L
 
     market = relationship("Market", back_populates="predictions")
     opportunity = relationship("Opportunity", back_populates="prediction")

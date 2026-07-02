@@ -91,10 +91,19 @@ def load_predictions(outcome: str | None = None, limit: int = 1000) -> pd.DataFr
                 # PROFIT if you cash out NOW (exit price if closed, else live price).
                 live_price = exit_p if exit_p is not None else current
                 live_profit = 100.0 * (live_price - entry) / entry
+                # Realistic fill: paper P&L assumes a mid-price fill, but a real
+                # order buys at the ask and sells at the bid, giving up ~one full
+                # bid/ask spread round-trip. Haircut on $100 ≈ 100 * spread / entry.
+                spread = p.entry_spread
+                if spread is not None:
+                    net_profit = live_profit - 100.0 * spread / entry
+                    net_str = _money(net_profit)
+                else:
+                    net_str = "—"
                 expected_str = _money(expected_profit)
                 live_str = _money(live_profit)
             else:
-                expected_str = live_str = "—"
+                expected_str = live_str = net_str = "—"
             out.append({
                 "Time": _fmt_local(p.created_at),
                 "Market": p.question,
@@ -104,6 +113,7 @@ def load_predictions(outcome: str | None = None, limit: int = 1000) -> pd.DataFr
                 "Current": f"{current:.0%}",
                 "Expected/$100": expected_str,
                 "Live/$100": live_str,
+                "Net/$100": net_str,
                 "Confidence": p.confidence.title(),
                 "Outcome": p.outcome,
                 "_question": p.question,
@@ -202,6 +212,7 @@ def get_performance() -> dict | None:
                 "outcome": p.outcome,
                 "day": (p.resolved_at or p.created_at).date(),
                 "created": p.created_at,
+                "spread": p.entry_spread,
             }
             for p in rows
         ]
@@ -209,6 +220,8 @@ def get_performance() -> dict | None:
         return None
 
     total_profit = 0.0
+    total_profit_net = 0.0      # after estimated bid/ask spread cost
+    net_covered = 0            # bets that had a recorded spread
     returns_by_day: dict = {}   # day -> list of per-bet returns
     all_returns: list = []
     for b in bets:
@@ -218,6 +231,13 @@ def get_performance() -> dict | None:
         total_profit += ret * 100.0
         all_returns.append(ret)
         returns_by_day.setdefault(b["day"], []).append(ret)
+        # Net return subtracts a ~one-spread round-trip cost (buy ask / sell bid).
+        if b["spread"] is not None:
+            net_ret = ret - (b["spread"] / b["entry"])
+            net_covered += 1
+        else:
+            net_ret = ret
+        total_profit_net += net_ret * 100.0
 
     # Average profit per bet = return on any capital split equally across every bet.
     avg_profit_bet = sum(all_returns) / len(all_returns) if all_returns else None
@@ -227,11 +247,15 @@ def get_performance() -> dict | None:
 
     first = bets[0]["created"]
     days = max((_dt.utcnow() - first).days, 1)
+    n = len(all_returns)
 
     return {
         "total_profit": total_profit,
+        "total_profit_net": total_profit_net,
         "avg_profit_bet": avg_profit_bet,
+        "avg_profit_bet_net": total_profit_net / 100.0 / n if n else None,
         "avg_profit_day": avg_profit_day,
+        "net_covered": net_covered,
         "days": days,
         "per_day": len(bets) / days,
         "n": len(bets),
@@ -347,7 +371,7 @@ if page == "🏠  Home":
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Wins", wins)
         c2.metric("Losses", losses)
-        c3.metric("Breakeven", breakeven, help="Price barely moved (±2%). Not counted as a win or loss, and excluded from the win-rate donut.")
+        c3.metric("Breakeven", breakeven, help="Price closed essentially flat (within ~0.5%, i.e. $0 on a $100 bet). Not counted as a win or loss, and excluded from the win-rate donut.")
         c4.metric("Pending", pending)
 
     st.divider()
@@ -398,6 +422,20 @@ if page == "🏠  Home":
             else:
                 st.info("Not enough closed bets yet.")
 
+        if perf.get("net_covered"):
+            st.caption(
+                f"📉 Estimated net of bid/ask spread: **${perf['total_profit_net']:+,.0f}** "
+                f"(vs ${perf['total_profit']:+,.0f} gross at mid-price). A real order buys at "
+                f"the ask and sells at the bid, giving up ~one spread round-trip. Spread was "
+                f"recorded on {perf['net_covered']} of {perf['n']} closed bets; older bets "
+                f"predate spread capture and are shown at their mid-price fill."
+            )
+        else:
+            st.caption(
+                "📉 Net-of-spread estimate will appear once positions opened after this "
+                "update start closing (entry spread is now recorded at open)."
+            )
+
     act = get_bet_activity()
     if act:
         b1, b2 = st.columns(2)
@@ -412,7 +450,7 @@ if page == "🏠  Home":
     if df_all.empty:
         st.info("No predictions yet — the bot will start recording positions on its first scan.")
     else:
-        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Expected/$100", "Live/$100", "Confidence", "Outcome"]
+        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Expected/$100", "Live/$100", "Net/$100", "Confidence", "Outcome"]
         st.dataframe(
             _style_feed(df_all[display_cols]),
             hide_index=True,
@@ -438,7 +476,7 @@ elif page == "✅  Wins":
     else:
         if search.strip():
             df_wins = df_wins[df_wins["_question"].str.contains(search.strip(), case=False, na=False)]
-        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Expected/$100", "Live/$100", "Confidence"]
+        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Expected/$100", "Live/$100", "Net/$100", "Confidence"]
         st.dataframe(
             df_wins[display_cols].reset_index(drop=True),
             hide_index=True,
@@ -464,7 +502,7 @@ elif page == "❌  Losses":
     else:
         if search.strip():
             df_losses = df_losses[df_losses["_question"].str.contains(search.strip(), case=False, na=False)]
-        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Expected/$100", "Live/$100", "Confidence"]
+        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Expected/$100", "Live/$100", "Net/$100", "Confidence"]
         st.dataframe(
             df_losses[display_cols].reset_index(drop=True),
             hide_index=True,
