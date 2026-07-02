@@ -96,12 +96,19 @@ class ProbabilityEstimator:
             try:
                 message = self.client.messages.create(
                     model=self.model,
-                    max_tokens=800,
+                    # Sonnet 5 runs adaptive thinking by default and thinking
+                    # tokens count against max_tokens, so leave generous room —
+                    # 800 was enough for Haiku's bare JSON but truncates here.
+                    max_tokens=4000,
                     system=SYSTEM_PROMPT,
                     messages=[{"role": "user", "content": prompt}],
-                    timeout=30.0,
+                    timeout=90.0,
                 )
-                raw = message.content[0].text.strip()
+                # content may start with a thinking block on Sonnet 5 — take
+                # the text block, wherever it is, not content[0].
+                raw = next(
+                    (b.text for b in message.content if b.type == "text"), ""
+                ).strip()
                 return self._parse_response(raw)
             except anthropic.RateLimitError:
                 wait = 20 * (attempt + 1)
