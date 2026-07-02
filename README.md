@@ -88,8 +88,7 @@ The price-checking uses Polymarket's free public API, so positions are watched c
   | **Total Profit ($100/bet)** | Dollars made at a flat $100 per bet |
   | **Avg Profit / Bet** | Average % per bet (return if you split a flat stake equally across every bet) |
   | **Avg Profit / Day** | The average % a typical trading day earned — differs from Avg Profit/Bet when bet volume varies day to day |
-  | **Return on your capital** | Type in a real bankroll (e.g. $1,000) and see the dollar profit if it were split evenly across every closed bet, instead of the flat $100/bet fiction above |
-  | **Today, on $X split across N bets** | Same bankroll, but scoped to only the bets opened today (since midnight Eastern) at their current value — still-open positions count at their live price. Resets to $0 every midnight |
+  | **Return on your capital** | Three independent boxes, each with its own bankroll amount: **all-time** (closed bets only — realized P&L), **today** (bets opened since midnight Eastern, open positions at their live price, resets to $0 every midnight), and **close everything now** (every bet ever opened, all-time, each valued as if closed this instant — realized + unrealized P&L combined) |
 
 - A **live feed** of every position:
 
