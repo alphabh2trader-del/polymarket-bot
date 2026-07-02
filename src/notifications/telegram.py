@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone as _utc
 from typing import Callable
 
 import requests
@@ -39,6 +39,31 @@ def _local(fmt: str) -> str:
     if _TZ is not None:
         return datetime.now(_TZ).strftime(fmt)
     return datetime.utcnow().strftime(fmt) + " UTC"
+
+
+def _fmt_opened(dt: datetime, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    """Format a naive-UTC datetime (as stored in the DB) in the configured
+    timezone — same convention as the dashboard's _fmt_local()."""
+    if _TZ is None:
+        return dt.strftime(fmt) + " UTC"
+    return dt.replace(tzinfo=_utc.utc).astimezone(_TZ).strftime(fmt)
+
+
+def _fmt_duration(opened_at: datetime, now: datetime | None = None) -> str:
+    """Human-readable elapsed time since opened_at, e.g. '3h 24m' or '1d 2h'.
+    Both datetimes are naive-UTC. Negative/clock-skew deltas clamp to 0m."""
+    now = now or datetime.utcnow()
+    total_minutes = max(0, int((now - opened_at).total_seconds() // 60))
+    days, rem = divmod(total_minutes, 1440)
+    hours, minutes = divmod(rem, 60)
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes or not parts:
+        parts.append(f"{minutes}m")
+    return " ".join(parts)
 
 from src.utils.logger import get_logger
 
@@ -93,6 +118,7 @@ class TelegramNotifier:
         return_pct: float,
         exit_reason: str,
         confidence: str,
+        opened_at: datetime | None = None,
     ) -> bool:
         reason_label = {
             "TARGET_HIT": "🎯 Hit target — sold for profit",
@@ -103,10 +129,17 @@ class TelegramNotifier:
         }.get(exit_reason, exit_reason)
         header = "✅ WIN" if outcome == "WIN" else "❌ LOSS"
         profit_100 = return_pct * 100
+        timing_line = ""
+        if opened_at is not None:
+            timing_line = (
+                f"<b>Opened:</b> {_fmt_opened(opened_at)}   "
+                f"<b>Held:</b> {_fmt_duration(opened_at)}\n"
+            )
         text = (
             f"<b>{header}</b>  ({reason_label})\n\n"
             f"<b>Market:</b> {question[:150]}\n"
             f"<b>Side:</b> {predicted_side}\n"
+            f"{timing_line}"
             f"<b>Entry:</b> {entry_price:.0%}  →  <b>Exit:</b> {exit_price:.0%}\n"
             f"<b>Return:</b> {return_pct:+.1%}   (${profit_100:+.0f} per $100)\n"
             f"<b>Confidence:</b> {confidence.title()}\n"

@@ -113,7 +113,7 @@ The price-checking uses Polymarket's free public API, so positions are watched c
 
 | When | Message |
 |---|---|
-| Position closes | WIN/LOSS with entry, exit, reason (🎯 target / 🛑 stop / ⏱ time / 📰 thesis / 🏁 resolved) and realized profit |
+| Position closes | WIN/LOSS with entry, exit, reason (🎯 target / 🛑 stop / ⏱ time / 📰 thesis / 🏁 resolved), realized profit, and when it was opened + how long it was held |
 | After each scan | "Scan complete" with each new edge and its expected return |
 | Daily 8 PM ET | Win rate + all-time W/L summary |
 | Sunday 8 PM ET | Weekly summary |

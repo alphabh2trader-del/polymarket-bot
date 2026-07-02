@@ -164,6 +164,7 @@ class ResolutionChecker:
                         return_pct=ret,
                         exit_reason=exit_reason,
                         confidence=p["confidence"],
+                        opened_at=p["created_at"],
                     )
                     if outcome == "WIN":
                         wins += 1
