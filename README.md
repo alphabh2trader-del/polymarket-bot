@@ -57,6 +57,7 @@ A position is only opened when **all** of these hold:
 | Minimum edge / EV | Expected value ≥ 5% | The gap is worth trading |
 | Win probability | Chosen side expected to win ≥ 55% | Targets a winning record |
 | Plausibility | Disagreement with the market ≤ 35 points | A huge gap usually means Claude is wrong, not the market |
+| Spread-adjusted edge | EV **after subtracting the live bid/ask spread cost** still ≥ 5%; skipped entirely if the spread can't be read | The other filters compare against the market's reference price, not a price you can actually trade at — this makes sure the edge survives paying to actually get in and out before the bot ever opens the position |
 
 > **Gap protection:** the liquidity floor, 7-day buffer, and one-bet-per-market rule exist to prevent **price gaps** — sudden jumps that make a stop fill far below 5%. No order type can guarantee a max loss in a true gap; the real protection is avoiding gap-prone markets (these filters) plus small position sizing (1% per bet on a live account).
 

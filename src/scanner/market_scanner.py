@@ -343,6 +343,27 @@ class MarketScanner:
             )
             return None
 
+        # Spread guard: every EV check so far compares against the market's
+        # reference price, not a price you can actually trade at. A real order
+        # buys at the ask and sells at the bid, paying the spread on both legs.
+        # Fetch it now and require the edge survive that cost — otherwise a
+        # "5% edge" opportunity can be a real-world loser before it even opens.
+        # No reliable spread reading (thin/unreadable book) -> skip; we can't
+        # confirm profitability without it.
+        entry_spread = self._entry_spread(market, ev_result.side)
+        if entry_spread is None:
+            log.debug(f"Skipped (no reliable spread data): {market.question[:50]}")
+            return None
+        spread_cost = entry_spread / ev_result.implied_prob
+        net_ev = ev_result.ev - spread_cost
+        if net_ev < settings.min_ev_threshold:
+            log.debug(
+                f"Skipped (EV {ev_result.ev:.1%} - spread cost {spread_cost:.1%} "
+                f"= net {net_ev:.1%} < {settings.min_ev_threshold:.1%} minimum): "
+                f"{market.question[:50]}"
+            )
+            return None
+
         kelly_size = position_size_usd(
             win_prob=ev_result.estimated_prob,
             price=ev_result.implied_prob,
@@ -372,10 +393,8 @@ class MarketScanner:
             articles=articles,
         )
 
-        # Capture the live bid/ask spread on the side we're entering, so the
-        # dashboard can show a realistic-fill P&L (paper P&L assumes a mid fill).
-        entry_spread = self._entry_spread(market, ev_result.side)
-
+        # entry_spread was already fetched and vetted by the spread guard above —
+        # reused here (not re-fetched) so what's stored matches what was checked.
         # Record prediction (deduped — one open position per market, re-entry after cooldown)
         self._save_prediction(
             db_market_id=db_market_id,

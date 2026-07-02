@@ -109,7 +109,9 @@ class Prediction(Base):
       stop price     = fixed stop_loss_pct (5%) below entry
       current_price  = latest price of the chosen side (refreshed each scan)
       exit_price     = price we "sold" at when the position closed
-      entry_spread   = bid/ask spread at entry (for realistic-fill P&L estimate)
+      entry_spread   = bid/ask spread at entry (gates the trade itself — see
+                       MarketScanner's spread guard — and drives the
+                       realistic-fill P&L estimate on the dashboard)
       outcome        = PENDING / WIN / LOSS / BREAKEVEN / VOID
       exit_reason    = TARGET_HIT / STOP_LOSS / TIME_EXIT / THESIS_EXIT / RESOLVED
     """
