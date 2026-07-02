@@ -781,11 +781,17 @@ class MarketScanner:
             )
             return pred.id
 
+    # A spread wider than this on a 0-1 probability scale isn't a real tradeable
+    # cost — it means the order book is too thin to have two honest quotes (e.g.
+    # a stray 1c bid against a stray 99c ask). Treat it as no data rather than
+    # feeding a nonsense number into the Net/$100 P&L estimate.
+    _MAX_PLAUSIBLE_SPREAD = 0.10
+
     def _entry_spread(self, market: MarketData, side: str) -> Optional[float]:
         """
         Live bid/ask spread (absolute, e.g. 0.02) on the side being entered, or
-        None if the book can't be read. Never raises — a spread failure must not
-        block opening the paper position.
+        None if the book can't be read or the reading isn't plausible. Never
+        raises — a spread failure must not block opening the paper position.
         """
         try:
             if not market.tokens:
@@ -799,7 +805,14 @@ class MarketScanner:
             if not ba:
                 return None
             best_bid, best_ask = ba
-            return round(best_ask - best_bid, 4)
+            spread = round(best_ask - best_bid, 4)
+            if spread > self._MAX_PLAUSIBLE_SPREAD:
+                log.debug(
+                    f"Discarding implausible spread {spread:.2f} for "
+                    f"{market.condition_id} (thin order book, not a real cost)"
+                )
+                return None
+            return spread
         except Exception as exc:
             log.debug(f"Entry spread unavailable for {market.condition_id}: {exc}")
             return None
