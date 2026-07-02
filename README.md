@@ -33,11 +33,12 @@ A position closes the moment **any** of these happens:
 1. **Price hits the target** → WIN (sold for profit) 🎯
 2. **Price drops 5% from entry** → LOSS (cut) 🛑
 3. **The news flips against it** → if a position moves against us, the bot re-reads the news and re-runs Claude; if the edge is gone, it closes immediately → `THESIS_EXIT` 📰
-4. **24 hours pass while in profit** → close at the current price (lock in the gain) ⏱
-5. **36 hours pass** (hard cap) → close no matter what ⏱
-6. **Market resolves** before any of the above → the close is an artifact, so it's marked **VOID** and excluded from the win rate (keeps stats honest)
+4. **24 hours pass** (hard cap, in profit or not) → close at the current price no matter what ⏱
+5. **Market resolves** before any of the above → the close is an artifact, so it's marked **VOID** and excluded from the win rate (keeps stats honest)
 
-No position ever stays open longer than 36 hours, so the win rate fills in within days — not months.
+A time-exit or thesis-exit that closes essentially flat (within 0.5% of entry — rounds to $0 on a $100 bet) is marked **BREAKEVEN** instead of a win or loss, so flat closes don't distort the win rate either way.
+
+No position ever stays open longer than 24 hours, so the win rate fills in within days — not months.
 
 ### Thesis re-check (news-driven exit)
 
@@ -67,7 +68,7 @@ The scanner runs **two independent jobs**:
 
 | Job | What it does | Cost | Frequency |
 |---|---|---|---|
-| **Scan** | Claude analyses the top 30 markets for new edges | 💰 paid | every **hour** |
+| **Scan** | Claude analyses the top 30 markets for new edges | 💰 paid | every **4 hours** (6×/day) |
 | **Position check** | Reads live prices; applies target / stop / time / thesis exits | 🆓 mostly free | every **1 minute** |
 
 The price-checking uses Polymarket's free public API, so positions are watched closely (every minute) without paying for an AI scan each time. The only paid part of a position check is the occasional triggered thesis re-check. The scan rotates through the full pool of eligible markets so it covers everything over a few hours.
@@ -83,10 +84,10 @@ The price-checking uses Polymarket's free public API, so positions are watched c
 
   | Metric | Meaning |
   |---|---|
-  | **Compounded Return** | Total % made since launch (reinvesting each bet) |
   | **Total Profit ($100/bet)** | Dollars made at a flat $100 per bet |
   | **Avg Profit / Bet** | Average % per bet (return if you split a flat stake equally across every bet) |
-  | **Avg Profit / Day** | The average % a typical trading day earned |
+  | **Avg Profit / Day** | The average % a typical trading day earned — differs from Avg Profit/Bet when bet volume varies day to day |
+  | **Return on your capital** | Type in a real bankroll (e.g. $1,000) and see the dollar profit if it were split evenly across every closed bet, instead of the flat $100/bet fiction above |
 
 - A **live feed** of every position:
 
@@ -152,7 +153,7 @@ Railway Service 1 — Dashboard (Streamlit)
 
 Railway Service 2 — Scanner (APScheduler)
   python src/main.py scan
-  ├── src/scanner/market_scanner.py      ← hourly scan + 1-min position check
+  ├── src/scanner/market_scanner.py      ← 4-hourly scan + 1-min position check
   ├── src/api/polymarket.py              ← market data (free Gamma API)
   ├── src/api/news.py                    ← TheNewsAPI → NewsAPI → GNews → RSS
   ├── src/analysis/probability.py        ← Claude probability estimate
@@ -179,13 +180,13 @@ Railway Service 2 — Scanner (APScheduler)
 
 | Resource | Monthly |
 |---|---|
-| Claude Haiku 4.5 (30 markets × 24 hourly scans + occasional thesis re-checks) | ~$60–85 |
+| Claude Sonnet 5 (30 markets × 6 scans/day + occasional thesis re-checks) | ~$45–90 |
 | Railway (2 services + PostgreSQL + Redis) | ~$15–20 |
 | TheNewsAPI (primary news source) | ~$15 (fixed) |
 | Polymarket market data (public) | $0 |
-| **Total** | **~$90–120/month** |
+| **Total** | **~$75–125/month** |
 
-Position price-checking is free; only the hourly AI scan and the rare triggered thesis re-check cost money. To lower the bill, reduce `max_markets_per_scan` or raise `scan_interval_minutes`.
+Position price-checking is free; only the scheduled AI scan and the rare triggered thesis re-check cost money. To lower the bill further, reduce `max_markets_per_scan` or raise `scan_interval_minutes` (fewer scans/day).
 
 ---
 
@@ -219,11 +220,12 @@ Required environment variables:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `scan_interval_minutes` | 60 | How often Claude scans (paid) |
+| `scan_interval_minutes` | 240 | How often Claude scans (paid) — every 4 hours, 6×/day |
 | `position_check_minutes` | 1 | How often prices are checked (free) |
 | `stop_loss_pct` | 0.05 | Cut a position once it's down 5% from entry |
 | `profit_hold_hours` | 24 | Close a winning position after this long |
-| `max_hold_hours` | 36 | Hard cap — close any position after this long |
+| `max_hold_hours` | 24 | Hard cap — close any open position after this long, no matter what |
+| `breakeven_band_pct` | 0.005 | A time/thesis exit within this % of entry is BREAKEVEN, not a win or loss |
 | `min_hours_to_resolution` | 168 | Skip markets resolving within 7 days (gap protection) |
 | `one_bet_per_market` | true | Never re-enter a market already traded |
 | `min_volume_usd` | 25,000 | Minimum 24h volume (liquidity floor) |
@@ -234,6 +236,7 @@ Required environment variables:
 | `recheck_trigger_pct` | 0.03 | Re-check when a position is down ≥3% from entry |
 | `recheck_cooldown_hours` | 2.0 | Don't re-check the same position more often than this |
 | `timezone` | America/Toronto | Timezone for schedules + all displayed times |
+| `anthropic_model` | claude-sonnet-5 | Model used for probability estimates + thesis re-checks |
 
 ---
 

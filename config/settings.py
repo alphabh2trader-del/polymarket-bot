@@ -47,7 +47,7 @@ class Settings(BaseSettings):
 
     # --- LLM ---
     anthropic_api_key: str = Field(default="", description="Anthropic Claude API key")
-    anthropic_model: str = "claude-haiku-4-5-20251001"
+    anthropic_model: str = "claude-sonnet-5"
 
     # --- Database ---
     # Railway provides DATABASE_URL with postgres:// prefix; SQLAlchemy needs postgresql://
@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     min_liquidity_usd: float = 10_000.0    # Min 24h volume
 
     # --- Scanner ---
-    scan_interval_minutes: int = 60        # how often Claude scans for new edges (costs money)
+    scan_interval_minutes: int = 240       # how often Claude scans for new edges (costs money)
     position_check_minutes: int = 1        # how often open positions are priced (free Polymarket calls)
     profit_hold_hours: int = 24            # close a position in profit after this many hours
     max_hold_hours: int = 24               # hard cap: force-close ANY open position after this many hours

@@ -180,10 +180,9 @@ def get_performance() -> dict | None:
     """
     Performance over every closed WIN/LOSS bet (VOID/PENDING ignored).
 
-      compounded_pct  — reinvest each bet: equity *= (1 + return), chronological
       total_profit    — flat $100 per bet: sum of return * $100
-      avg_profit_bet  — mean return % per bet (= return on $1000 split equally
-                        across every bet)
+      avg_profit_bet  — mean return % per bet (= return on any capital split
+                        equally across every bet)
       avg_profit_day  — mean of each day's average return % (avg profit per day)
       days            — calendar days since the first bet
       per_day         — closed bets per day
@@ -209,7 +208,6 @@ def get_performance() -> dict | None:
     if not bets:
         return None
 
-    equity = 1.0
     total_profit = 0.0
     returns_by_day: dict = {}   # day -> list of per-bet returns
     all_returns: list = []
@@ -217,12 +215,11 @@ def get_performance() -> dict | None:
         if not b["entry"] or b["exit"] is None:
             continue
         ret = (b["exit"] - b["entry"]) / b["entry"]
-        equity *= (1 + ret)
         total_profit += ret * 100.0
         all_returns.append(ret)
         returns_by_day.setdefault(b["day"], []).append(ret)
 
-    # Average profit per bet = return on $1000 split equally across every bet.
+    # Average profit per bet = return on any capital split equally across every bet.
     avg_profit_bet = sum(all_returns) / len(all_returns) if all_returns else None
     # Average profit per day = mean of each day's average bet return.
     daily_avgs = [sum(r) / len(r) for r in returns_by_day.values() if r]
@@ -232,7 +229,6 @@ def get_performance() -> dict | None:
     days = max((_dt.utcnow() - first).days, 1)
 
     return {
-        "compounded_pct": equity - 1.0,
         "total_profit": total_profit,
         "avg_profit_bet": avg_profit_bet,
         "avg_profit_day": avg_profit_day,
@@ -360,31 +356,47 @@ if page == "🏠  Home":
     if not perf:
         st.info("No closed bets yet — performance will appear once positions start resolving.")
     else:
-        p1, p2, p3, p4 = st.columns(4)
+        p1, p2, p3 = st.columns(3)
         p1.metric(
-            "Compounded Return",
-            f"{perf['compounded_pct']:+.1%}",
-            help="Reinvest every bet: equity ×(1+return), in order. This is your true running return.",
-        )
-        p2.metric(
             "Total Profit ($100/bet)",
             f"${perf['total_profit']:+,.0f}",
             help="If you staked a flat $100 on every closed bet, this is the summed profit.",
         )
-        p3.metric(
+        p2.metric(
             "Avg Profit / Bet",
             f"{perf['avg_profit_bet']:+.1%}" if perf["avg_profit_bet"] is not None else "—",
-            help="Average return per bet — i.e. your return if you'd split a flat stake (say $1000) equally across every bet.",
+            help="Average return per bet — i.e. your return if you'd split a flat stake equally across every bet.",
         )
-        p4.metric(
+        p3.metric(
             "Avg Profit / Day",
             f"{perf['avg_profit_day']:+.1%}" if perf["avg_profit_day"] is not None else "—",
-            help="Average of each day's average return %. What a typical trading day earned.",
+            help="Average of each day's average return %. Differs from Avg Profit/Bet when bet volume varies "
+                 "day to day — a day with 1 bet counts as much as a day with 10.",
         )
         st.caption(
             f"Based on {perf['n']} closed bets over {perf['days']} day(s) "
             f"(~{perf['per_day']:.1f} per day)."
         )
+
+        st.markdown("##### Return on your capital")
+        cap_col, result_col = st.columns([1, 2])
+        with cap_col:
+            capital = st.number_input(
+                "Starting capital ($)", min_value=100, value=1000, step=100,
+                help="Hypothetical bankroll, split equally across every closed bet.",
+            )
+        with result_col:
+            if perf["avg_profit_bet"] is not None:
+                capital_profit = capital * perf["avg_profit_bet"]
+                st.metric(
+                    f"On ${capital:,.0f} split across {perf['n']} bets",
+                    f"${capital_profit:+,.2f}",
+                    f"{perf['avg_profit_bet']:+.1%}",
+                    help="Same as Avg Profit/Bet, just shown in dollars for a real bankroll instead of the "
+                         "flat $100-per-bet stat above.",
+                )
+            else:
+                st.info("Not enough closed bets yet.")
 
     act = get_bet_activity()
     if act:
