@@ -10,6 +10,10 @@ class Settings(BaseSettings):
         env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        # Ignore unknown env vars instead of rejecting them. Removed keys (e.g. the
+        # retired NEWSAPI_KEY / GNEWS_API_KEY) may still linger in .env or on the
+        # host — without this, a leftover var would crash the bot on startup.
+        extra="ignore",
     )
 
     # Credentials pasted into hosting dashboards often pick up a stray leading
@@ -20,8 +24,6 @@ class Settings(BaseSettings):
     @field_validator(
         "polymarket_api_key",
         "polymarket_private_key",
-        "newsapi_key",
-        "gnews_api_key",
         "thenewsapi_key",
         "anthropic_api_key",
         "anthropic_model",
@@ -41,9 +43,7 @@ class Settings(BaseSettings):
     polymarket_chain_id: int = 137  # Polygon mainnet
 
     # --- News ---
-    newsapi_key: str = Field(default="", description="NewsAPI.org key")
-    gnews_api_key: str = Field(default="", description="GNews API key (backup)")
-    thenewsapi_key: str = Field(default="", description="TheNewsAPI.com token (primary)")
+    thenewsapi_key: str = Field(default="", description="TheNewsAPI.com token (only keyed news source; free RSS is the fallback)")
 
     # --- LLM ---
     anthropic_api_key: str = Field(default="", description="Anthropic Claude API key")

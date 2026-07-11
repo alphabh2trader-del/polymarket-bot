@@ -2,10 +2,8 @@
 Multi-source news aggregator.
 
 Sources:
-  1. TheNewsAPI   — keyword search, structured JSON (primary)
-  2. NewsAPI.org  — keyword search, structured JSON
-  3. GNews API    — fallback keyword search
-  4. RSS feeds    — Reuters, AP, BBC via feedparser (no key needed)
+  1. TheNewsAPI   — keyword search, structured JSON (the only keyed source)
+  2. RSS feeds    — Reuters, AP, BBC via feedparser (free, no key needed)
 """
 
 from __future__ import annotations
@@ -64,16 +62,11 @@ QUERY_STOPWORDS = {
 # Maps internal source-function names to the human service name shown in alerts.
 _SOURCE_LABELS = {
     "_search_thenewsapi": "TheNewsAPI",
-    "_search_newsapi": "NewsAPI.org",
-    "_search_gnews": "GNews",
 }
 
 
 class NewsAggregator:
-    def __init__(self, newsapi_key: str = "", gnews_key: str = "", thenewsapi_key: str = "",
-                 on_api_error=None):
-        self.newsapi_key = newsapi_key
-        self.gnews_key = gnews_key
+    def __init__(self, thenewsapi_key: str = "", on_api_error=None):
         self.thenewsapi_key = thenewsapi_key
         # Optional callback(service: str, reason: str) fired when a source fails
         # with an auth/quota error (key expired/revoked/over-limit). Used to send
@@ -129,8 +122,6 @@ class NewsAggregator:
 
         sources = [
             self._search_thenewsapi,
-            self._search_newsapi,
-            self._search_gnews,
             self._search_rss,
         ]
 
@@ -190,94 +181,6 @@ class NewsAggregator:
                     source=item.get("source", "TheNewsAPI"),
                     published_at=published,
                     snippet=item.get("description", "") or item.get("snippet", ""),
-                ))
-            except Exception:
-                continue
-        return articles
-
-    # ------------------------------------------------------------------ #
-    # NewsAPI                                                              #
-    # ------------------------------------------------------------------ #
-
-    @retry(
-        retry=retry_if_exception_type(requests.RequestException),
-        stop=stop_after_attempt(2),
-        wait=wait_exponential(min=1, max=10),
-        reraise=False,
-    )
-    def _search_newsapi(self, query: str, days_back: int) -> list[Article]:
-        if not self.newsapi_key:
-            return []
-
-        from_date = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d")
-        resp = self._session.get(
-            "https://newsapi.org/v2/everything",
-            params={
-                "q": query,
-                "from": from_date,
-                "sortBy": "relevancy",
-                "pageSize": 20,
-                "language": "en",
-                "apiKey": self.newsapi_key,
-            },
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-        articles = []
-        for item in data.get("articles", []):
-            try:
-                published = datetime.fromisoformat(
-                    item["publishedAt"].replace("Z", "+00:00")
-                )
-                articles.append(Article(
-                    title=item.get("title", ""),
-                    url=item.get("url", ""),
-                    source=item.get("source", {}).get("name", "NewsAPI"),
-                    published_at=published,
-                    snippet=item.get("description", "") or item.get("content", ""),
-                ))
-            except Exception:
-                continue
-        return articles
-
-    # ------------------------------------------------------------------ #
-    # GNews                                                                #
-    # ------------------------------------------------------------------ #
-
-    def _search_gnews(self, query: str, days_back: int) -> list[Article]:
-        if not self.gnews_key:
-            return []
-
-        resp = self._session.get(
-            "https://gnews.io/api/v4/search",
-            params={
-                "q": query,
-                "lang": "en",
-                "max": 10,
-                "token": self.gnews_key,
-            },
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-        cutoff = datetime.utcnow() - timedelta(days=days_back)
-        articles = []
-        for item in data.get("articles", []):
-            try:
-                published = datetime.fromisoformat(
-                    item["publishedAt"].replace("Z", "+00:00")
-                )
-                if published.replace(tzinfo=None) < cutoff:
-                    continue
-                articles.append(Article(
-                    title=item.get("title", ""),
-                    url=item.get("url", ""),
-                    source=item.get("source", {}).get("name", "GNews"),
-                    published_at=published,
-                    snippet=item.get("description", ""),
                 ))
             except Exception:
                 continue

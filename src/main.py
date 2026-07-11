@@ -120,8 +120,6 @@ def cmd_check(args) -> None:
         "Polymarket API key": bool(settings.polymarket_api_key),
         "Anthropic API key": bool(settings.anthropic_api_key),
         "TheNewsAPI key": bool(settings.thenewsapi_key),
-        "NewsAPI key": bool(settings.newsapi_key),
-        "GNews key": bool(settings.gnews_api_key),
         "Database URL": bool(settings.database_url),
     }
     for k, v in checks.items():
@@ -147,18 +145,6 @@ def cmd_check(args) -> None:
             from src.api.news import NewsAggregator
             agg = NewsAggregator(thenewsapi_key=settings.thenewsapi_key)
             articles = agg._search_thenewsapi("US election", days_back=7)
-            print(f"  [OK]  Connected -- {len(articles)} articles returned")
-        except Exception as exc:
-            print(f"  [FAIL]  Failed: {exc}")
-    else:
-        print("  - Skipped (no key)")
-
-    print("\n--- NewsAPI Connectivity ---")
-    if settings.newsapi_key:
-        try:
-            from src.api.news import NewsAggregator
-            agg = NewsAggregator(newsapi_key=settings.newsapi_key)
-            articles = agg._search_newsapi("US election", days_back=7)
             print(f"  [OK]  Connected -- {len(articles)} articles returned")
         except Exception as exc:
             print(f"  [FAIL]  Failed: {exc}")

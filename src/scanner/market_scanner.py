@@ -42,8 +42,6 @@ class MarketScanner:
         # invoked later during scans, by which point it exists.
         _api_alert = lambda service, reason: self.telegram.send_api_alert(service, reason)
         self.news = NewsAggregator(
-            newsapi_key=settings.newsapi_key,
-            gnews_key=settings.gnews_api_key,
             thenewsapi_key=settings.thenewsapi_key,
             on_api_error=_api_alert,
         )

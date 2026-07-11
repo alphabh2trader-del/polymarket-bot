@@ -160,7 +160,7 @@ Railway Service 2 — Scanner (APScheduler)
   python src/main.py scan
   ├── src/scanner/market_scanner.py      ← 4-hourly scan + 1-min position check
   ├── src/api/polymarket.py              ← market data (free Gamma API)
-  ├── src/api/news.py                    ← TheNewsAPI → NewsAPI → GNews → RSS
+  ├── src/api/news.py                    ← TheNewsAPI → RSS (Reuters/AP/BBC)
   ├── src/analysis/probability.py        ← Claude probability estimate
   ├── src/analysis/ev_calculator.py      ← edge & EV
   ├── src/scanner/resolution_checker.py  ← position tracker (target/stop/time/thesis/settle)
@@ -218,8 +218,7 @@ Required environment variables:
 | `DATABASE_URL` | Railway PostgreSQL URL (or omit for local SQLite) |
 | `TELEGRAM_BOT_TOKEN` | @BotFather on Telegram |
 | `TELEGRAM_CHAT_ID` | @userinfobot on Telegram |
-| `THENEWSAPI_KEY` | https://www.thenewsapi.com (primary news; optional — falls back to free RSS) |
-| `NEWSAPI_KEY` / `GNEWS_API_KEY` | Optional backup news sources |
+| `THENEWSAPI_KEY` | https://www.thenewsapi.com (the only keyed news source; optional — falls back to free RSS) |
 
 > Polymarket needs **no API key** for market data. A wallet key is only required for *real* trading, which this bot does not do.
 
