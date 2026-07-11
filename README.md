@@ -87,7 +87,7 @@ The price-checking uses Polymarket's free public API, so positions are watched c
   |---|---|
   | **Total Profit ($100/bet)** | Dollars made at a flat $100 per bet |
   | **Avg Profit / Bet** | Average % per bet (return if you split a flat stake equally across every bet) |
-  | **Avg Profit / Day** | The average % a typical trading day earned — differs from Avg Profit/Bet when bet volume varies day to day |
+  | **Is Claude's confidence trustworthy?** | A collapsible calibration panel: for each band of predicted win-probability, what share of those bets *actually* won. When "Actually won" ≈ "Avg predicted", his brain is well-calibrated. Read-only; needs 30–50+ closed bets to be meaningful |
   | **Return on your capital** | Three independent boxes, each with its own bankroll amount: **all-time** (closed bets only — realized P&L), **today** (bets opened since midnight Eastern, open positions at their live price, resets to $0 every midnight), and **close everything now** (every bet ever opened, all-time, each valued as if closed this instant — realized + unrealized P&L combined) |
 
 - A **live feed** of every position:
@@ -187,12 +187,15 @@ Railway Service 2 — Scanner (APScheduler)
 | Resource | Monthly |
 |---|---|
 | Claude Sonnet 5 (30 markets × 6 scans/day + occasional thesis re-checks) | ~$45–90 |
+| Claude live web search (only when news is thin; hard-capped ~100/day) | ~$0–60 (≤ $4/day) |
 | Railway (2 services + PostgreSQL + Redis) | ~$15–20 |
 | TheNewsAPI (primary news source) | ~$15 (fixed) |
 | Polymarket market data (public) | $0 |
-| **Total** | **~$75–125/month** |
+| **Total** | **~$75–185/month** |
 
 Position price-checking is free; only the scheduled AI scan and the rare triggered thesis re-check cost money. To lower the bill further, reduce `max_markets_per_scan` or raise `scan_interval_minutes` (fewer scans/day).
+
+**Live web search** (`WEB_SEARCH_*` settings): when the news APIs return fewer than `web_search_news_threshold` (default 3) articles for a market, Claude is given Anthropic's server-side web-search tool so he can research that market himself instead of guessing from stale headlines — this is the single biggest boost to estimate quality. It bills at ~$0.01 per search, so a hard daily cap (`web_search_max_per_day`, default 100) keeps the added cost under ~$4/day. Lower the cap to spend less; set `web_search_enabled=false` to turn it off.
 
 ---
 

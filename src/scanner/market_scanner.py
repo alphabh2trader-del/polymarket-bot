@@ -6,6 +6,7 @@ tracks open positions every minute, and fires Telegram reports on schedule.
 
 from __future__ import annotations
 
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
@@ -75,6 +76,36 @@ class MarketScanner:
         )
         self._scheduler = BlockingScheduler(timezone=settings.timezone)
         self._scan_offset = 0  # rotates through eligible markets each scan
+
+        # Daily web-search budget backstop. Analysis runs on a small thread pool,
+        # so guard the counter with a lock. Counter rolls over at UTC midnight.
+        self._search_lock = threading.Lock()
+        self._search_day = None          # date the current count belongs to
+        self._searches_today = 0
+
+    # ------------------------------------------------------------------ #
+    # Web-search cost budget                                               #
+    # ------------------------------------------------------------------ #
+
+    def _search_budget_allows(self) -> bool:
+        """True if web search is enabled and we're under the daily cap. Rolls the
+        counter at UTC midnight. The cap is a cost backstop — the primary gate is
+        thin news (most markets get enough headlines and never search)."""
+        if not settings.web_search_enabled:
+            return False
+        today = datetime.utcnow().date()
+        with self._search_lock:
+            if self._search_day != today:
+                self._search_day = today
+                self._searches_today = 0
+            return self._searches_today < settings.web_search_max_per_day
+
+    def _record_searches(self, n: int) -> None:
+        """Add the searches actually run (read from Anthropic usage) to today's tally."""
+        if not n:
+            return
+        with self._search_lock:
+            self._searches_today += n
 
     # ------------------------------------------------------------------ #
     # Scheduler                                                            #
@@ -306,6 +337,14 @@ class MarketScanner:
             else "Unknown"
         )
 
+        # Give Claude live web search only when the pre-fetched news is thin (the
+        # case that actually needs it) AND we're under the daily cost cap. Most
+        # markets return enough headlines and never trigger a paid search.
+        allow_search = (
+            len(articles) < settings.web_search_news_threshold
+            and self._search_budget_allows()
+        )
+
         estimate: ProbabilityEstimate = self.estimator.estimate(
             question=market.question,
             description=market.description,
@@ -313,7 +352,15 @@ class MarketScanner:
             no_price=market.no_price,
             resolution_date=res_str,
             news_text=news_text,
+            allow_web_search=allow_search,
+            web_search_max_uses=settings.web_search_max_uses_per_market,
         )
+        if estimate.web_searches:
+            self._record_searches(estimate.web_searches)
+            log.info(
+                f"Web search used {estimate.web_searches}x for "
+                f"{market.question[:50]} (thin news: {len(articles)} articles)"
+            )
         log.debug(
             f"{market.question[:60]} | "
             f"implied={market.yes_price:.2f} estimated={estimate.probability:.2f} "

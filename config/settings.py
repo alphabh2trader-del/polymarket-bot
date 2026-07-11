@@ -49,6 +49,19 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="", description="Anthropic Claude API key")
     anthropic_model: str = "claude-sonnet-5"
 
+    # --- Live web search (Anthropic server-side tool) ---
+    # Lets Claude search the live web WHILE estimating a market, instead of only
+    # reading pre-fetched headlines. Gated hard on cost: it only fires when the
+    # news feed came back thin (few/no articles — the case that actually needs
+    # help), and a daily cap bounds the spend. Web search bills at ~$0.01 per
+    # search, so web_search_max_per_day * ~$0.02 (fee + extra tokens it pulls in)
+    # is the rough daily ceiling this feature adds — 100 keeps it near ~$2/day and
+    # comfortably under the $4/day budget. Lower the cap to spend less.
+    web_search_enabled: bool = True
+    web_search_news_threshold: int = 3     # only search when fewer than this many articles were found
+    web_search_max_uses_per_market: int = 2  # max searches Claude may run within one market's analysis
+    web_search_max_per_day: int = 100      # hard daily cap on total searches (cost backstop)
+
     # --- Database ---
     # Railway provides DATABASE_URL with postgres:// prefix; SQLAlchemy needs postgresql://
     database_url: str = f"sqlite:///{BASE_DIR}/data/polymarket.db"

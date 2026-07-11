@@ -63,6 +63,7 @@ class ProbabilityEstimate:
     risks: list[str]
     base_rate_notes: str
     raw_response: str = ""
+    web_searches: int = 0    # how many live web searches Claude actually ran (for cost accounting)
 
     @property
     def confidence_weight(self) -> float:
@@ -102,6 +103,8 @@ class ProbabilityEstimator:
         no_price: float,
         resolution_date: str,
         news_text: str,
+        allow_web_search: bool = False,
+        web_search_max_uses: int = 2,
     ) -> ProbabilityEstimate:
         prompt = ESTIMATION_PROMPT.format(
             question=question,
@@ -112,9 +115,22 @@ class ProbabilityEstimator:
             news_text=news_text or "No recent news found.",
         )
 
+        # When allowed (news came back thin and we're under the daily budget),
+        # give Claude the Anthropic server-side web_search tool so he can look up
+        # the specific market himself instead of relying on pre-fetched headlines.
+        # It's a server tool — Anthropic runs the searches and returns the final
+        # answer in one call, so the text-extraction below is unchanged.
+        tools = None
+        if allow_web_search:
+            tools = [{
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": max(1, web_search_max_uses),
+            }]
+
         for attempt in range(3):
             try:
-                message = self.client.messages.create(
+                kwargs = dict(
                     model=self.model,
                     # Sonnet 5 runs adaptive thinking by default and thinking
                     # tokens count against max_tokens, so leave generous room —
@@ -124,11 +140,28 @@ class ProbabilityEstimator:
                     messages=[{"role": "user", "content": prompt}],
                     timeout=90.0,
                 )
-                # content may start with a thinking block on Sonnet 5 — take
-                # the text block, wherever it is, not content[0].
+                if tools is not None:
+                    kwargs["tools"] = tools
+                try:
+                    message = self.client.messages.create(**kwargs)
+                except anthropic.BadRequestError as exc:
+                    # Tool unsupported/misconfigured on this account or model —
+                    # don't lose the estimate over it. Retry once WITHOUT the
+                    # tool; a plain estimate still beats falling back to price.
+                    if tools is not None:
+                        log.warning(f"Web search rejected ({exc}); retrying without it")
+                        tools = None
+                        kwargs.pop("tools", None)
+                        message = self.client.messages.create(**kwargs)
+                    else:
+                        raise
+                # content may start with a thinking block on Sonnet 5, and (with
+                # search) server_tool_use / web_search_result blocks — take the
+                # text block, wherever it is, not content[0].
                 raw = next(
                     (b.text for b in message.content if b.type == "text"), ""
                 ).strip()
+                searches_used = self._count_searches(message)
                 if message.stop_reason == "max_tokens" and not raw:
                     # Adaptive thinking used the whole budget before any text
                     # block was written. Log this distinctly from a parse
@@ -140,7 +173,7 @@ class ProbabilityEstimator:
                         f"(attempt {attempt+1}/3) — thinking used the full "
                         f"4000-token budget with no output"
                     )
-                return self._parse_response(raw)
+                return self._parse_response(raw, web_searches=searches_used)
             except anthropic.RateLimitError:
                 wait = 20 * (attempt + 1)
                 log.warning(f"Claude rate limited — waiting {wait}s (attempt {attempt+1}/3)")
@@ -162,7 +195,20 @@ class ProbabilityEstimator:
                     time.sleep(5)
         return self._fallback_estimate(yes_price)
 
-    def _parse_response(self, raw: str) -> ProbabilityEstimate:
+    @staticmethod
+    def _count_searches(message) -> int:
+        """Actual number of live web searches Anthropic ran for this message, read
+        from usage.server_tool_use.web_search_requests. Defensive: returns 0 if the
+        field is absent (no tool used, or an older SDK that doesn't expose it)."""
+        try:
+            stu = getattr(message.usage, "server_tool_use", None)
+            if stu is None:
+                return 0
+            return int(getattr(stu, "web_search_requests", 0) or 0)
+        except Exception:
+            return 0
+
+    def _parse_response(self, raw: str, web_searches: int = 0) -> ProbabilityEstimate:
         # Strip markdown code fences if present
         text = raw
         if "```" in text:
@@ -183,6 +229,7 @@ class ProbabilityEstimator:
             risks=data.get("risks_to_estimate", []),
             base_rate_notes=data.get("base_rate_notes", ""),
             raw_response=raw,
+            web_searches=web_searches,
         )
 
     @staticmethod

@@ -255,6 +255,40 @@ def get_close_now_capital_return() -> dict | None:
 
 
 @st.cache_data(ttl=30)
+def get_calibration() -> list[dict] | None:
+    """
+    Calibration of Claude's confidence — the "is his brain trustworthy" check.
+    For each band of predicted win-probability, how often did the chosen side
+    ACTUALLY win? A well-calibrated brain wins ~80% of the bets it rated 80%
+    likely. Only closed WIN/LOSS bets count (BREAKEVEN/VOID/PENDING excluded).
+    Purely read-only — never touches trade logic, only reads existing columns.
+    """
+    bands = [(0.50, 0.65), (0.65, 0.75), (0.75, 0.85), (0.85, 0.95), (0.95, 1.01)]
+    with get_session() as session:
+        rows = (
+            session.query(Prediction.predicted_prob, Prediction.outcome)
+            .filter(Prediction.outcome.in_(("WIN", "LOSS")))
+            .all()
+        )
+    if not rows:
+        return None
+    out: list[dict] = []
+    for lo, hi in bands:
+        band_rows = [(pp, o) for pp, o in rows if pp is not None and lo <= pp < hi]
+        n = len(band_rows)
+        if n == 0:
+            continue
+        wins = sum(1 for _, o in band_rows if o == "WIN")
+        out.append({
+            "band": f"{lo:.0%}–{min(hi, 1.0):.0%}",
+            "n": n,
+            "predicted": sum(pp for pp, _ in band_rows) / n,
+            "actual": wins / n,
+        })
+    return out or None
+
+
+@st.cache_data(ttl=30)
 def get_performance() -> dict | None:
     """
     Performance over every closed WIN/LOSS bet (VOID/PENDING ignored).
@@ -447,7 +481,7 @@ if page == "🏠  Home":
     if not perf:
         st.info("No closed bets yet — performance will appear once positions start resolving.")
     else:
-        p1, p2, p3 = st.columns(3)
+        p1, p2 = st.columns(2)
         p1.metric(
             "Total Profit ($100/bet)",
             f"${perf['total_profit']:+,.0f}",
@@ -458,16 +492,39 @@ if page == "🏠  Home":
             f"{perf['avg_profit_bet']:+.1%}" if perf["avg_profit_bet"] is not None else "—",
             help="Average return per bet — i.e. your return if you'd split a flat stake equally across every bet.",
         )
-        p3.metric(
-            "Avg Profit / Day",
-            f"{perf['avg_profit_day']:+.1%}" if perf["avg_profit_day"] is not None else "—",
-            help="Average of each day's average return %. Differs from Avg Profit/Bet when bet volume varies "
-                 "day to day — a day with 1 bet counts as much as a day with 10.",
-        )
         st.caption(
             f"Based on {perf['n']} closed bets over {perf['days']} day(s) "
             f"(~{perf['per_day']:.1f} per day)."
         )
+
+    # Calibration — tucked in an expander so the main view stays clean. This is
+    # the "can I trust Claude's brain" panel: it compares what he predicted
+    # against what actually happened. Only meaningful with a decent sample.
+    with st.expander("🎯 Is Claude's confidence trustworthy? (predicted vs. actual)"):
+        calib = get_calibration()
+        if not calib:
+            st.caption(
+                "No closed bets yet — this needs resolved WIN/LOSS bets to compare "
+                "what Claude predicted against what actually happened."
+            )
+        else:
+            cal_df = pd.DataFrame([
+                {
+                    "Claude rated": c["band"],
+                    "Avg predicted": f"{c['predicted']:.0%}",
+                    "Actually won": f"{c['actual']:.0%}",
+                    "Bets": c["n"],
+                }
+                for c in calib
+            ])
+            st.dataframe(cal_df, hide_index=True, use_container_width=True)
+            total_n = sum(c["n"] for c in calib)
+            st.caption(
+                "Read each row: of the bets Claude rated in that probability band, "
+                "what share actually won. When 'Actually won' ≈ 'Avg predicted', his "
+                f"brain is well-calibrated. Based on {total_n} closed bet(s) — treat it "
+                "as noisy until you have 30–50+."
+            )
 
     # The three boxes below don't all need perf (Today / Close-everything-now
     # include open positions and have data even with zero closed bets) so they
@@ -558,10 +615,8 @@ if page == "🏠  Home":
 
     act = get_bet_activity()
     if act:
-        b1, b2 = st.columns(2)
-        b1.metric("Avg Bets Opened / Day", f"{act['avg_per_day']:.1f}",
+        st.metric("Avg Bets Opened / Day", f"{act['avg_per_day']:.1f}",
                   help=f"{act['total']} bets opened over {act['days']} day(s).")
-        b2.metric("Bets Opened Today", act["today"], help="Positions opened so far today (Eastern).")
 
     st.divider()
     st.subheader("Live Positions")
