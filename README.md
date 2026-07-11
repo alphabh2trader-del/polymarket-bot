@@ -115,6 +115,7 @@ The price-checking uses Polymarket's free public API, so positions are watched c
 |---|---|
 | Position closes | WIN/LOSS with entry, exit, reason (🎯 target / 🛑 stop / ⏱ time / 📰 thesis / 🏁 resolved), realized profit, and when it was opened + how long it was held |
 | After each scan | "Scan complete" with each new edge and its expected return |
+| ⚠️ API key / subscription problem | When a news source or Claude starts getting rejected — a `401/403` (key expired, revoked, or over its plan limit) or `429` (monthly quota exhausted). Names the service so you know which account to check. Deduplicated to once per service per day. *(Note: most providers don't expose a "quota remaining" countdown, so this fires the moment a key **starts failing** — which is when you need to act — rather than predicting it in advance.)* |
 | Daily 8 PM ET | Win rate + all-time W/L summary |
 | Sunday 8 PM ET | Weekly summary |
 | 1st of month 8 PM ET | Monthly summary |

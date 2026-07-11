@@ -37,14 +37,19 @@ class MarketScanner:
             api_key=settings.polymarket_api_key,
             private_key=settings.polymarket_private_key,
         )
+        # Lazy callback: self.telegram is constructed below, but this is only
+        # invoked later during scans, by which point it exists.
+        _api_alert = lambda service, reason: self.telegram.send_api_alert(service, reason)
         self.news = NewsAggregator(
             newsapi_key=settings.newsapi_key,
             gnews_key=settings.gnews_api_key,
             thenewsapi_key=settings.thenewsapi_key,
+            on_api_error=_api_alert,
         )
         self.estimator = ProbabilityEstimator(
             api_key=settings.anthropic_api_key,
             model=settings.anthropic_model,
+            on_api_error=_api_alert,
         )
         self.risk = RiskManager(
             account_equity=settings.account_equity_usd,

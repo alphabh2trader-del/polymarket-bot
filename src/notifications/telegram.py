@@ -80,6 +80,10 @@ class TelegramNotifier:
         self._base = _API_BASE.format(token=bot_token)
         self._url = f"{self._base}/sendMessage"
         self._enabled = bool(bot_token and chat_id)
+        # service name -> local date (YYYY-MM-DD) an API alert was last sent, so a
+        # source failing on every scan only messages once per day. In-memory: a
+        # restart may re-send once, which is acceptable (still ~1/day/service).
+        self._api_alert_sent: dict[str, str] = {}
         if not self._enabled:
             log.warning("Telegram notifier disabled — set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID")
 
@@ -143,6 +147,31 @@ class TelegramNotifier:
             f"<b>Entry:</b> {entry_price:.0%}  →  <b>Exit:</b> {exit_price:.0%}\n"
             f"<b>Return:</b> {return_pct:+.1%}   (${profit_100:+.0f} per $100)\n"
             f"<b>Confidence:</b> {confidence.title()}\n"
+            f"<i>{_local('%Y-%m-%d %H:%M %Z')}</i>"
+        )
+        return self._send(text)
+
+    # ------------------------------------------------------------------ #
+    # API key / subscription alert                                         #
+    # ------------------------------------------------------------------ #
+
+    def send_api_alert(self, service: str, reason: str) -> bool:
+        """
+        Alert that an external API key or subscription looks exhausted, expired,
+        or unauthorized (a 401/403 rejection or 429 quota-exhausted response).
+        Deduplicated to at most one message per service per day so a source that
+        fails on every scan doesn't spam the chat.
+        """
+        today = _local("%Y-%m-%d")
+        if self._api_alert_sent.get(service) == today:
+            return False
+        self._api_alert_sent[service] = today
+        text = (
+            f"⚠️ <b>API / subscription alert</b>\n\n"
+            f"<b>Service:</b> {service}\n"
+            f"<b>Problem:</b> {reason}\n\n"
+            f"This usually means an expired key, an exhausted monthly quota, or a "
+            f"billing / subscription issue. Check the {service} account.\n"
             f"<i>{_local('%Y-%m-%d %H:%M %Z')}</i>"
         )
         return self._send(text)

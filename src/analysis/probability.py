@@ -70,9 +70,29 @@ class ProbabilityEstimate:
 
 
 class ProbabilityEstimator:
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-6"):
+    def __init__(self, api_key: str, model: str = "claude-sonnet-4-6", on_api_error=None):
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model = model
+        # Optional callback(service: str, reason: str) fired when Claude rejects
+        # the key (401) or denies permission (403 — often an exhausted credit
+        # balance). Used to send a Telegram alert.
+        self.on_api_error = on_api_error
+
+    def _notify_api_error(self, exc) -> None:
+        if self.on_api_error is None:
+            return
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status == 401:
+            reason = "API key rejected (401) — likely expired or revoked"
+        elif status == 403:
+            reason = ("permission denied (403) — often means the credit balance is "
+                      "exhausted or the key is disabled")
+        else:
+            reason = f"authentication problem ({status})"
+        try:
+            self.on_api_error("Anthropic Claude", reason)
+        except Exception as exc2:
+            log.debug(f"API-error alert callback failed: {exc2}")
 
     def estimate(
         self,
@@ -125,6 +145,13 @@ class ProbabilityEstimator:
                 wait = 20 * (attempt + 1)
                 log.warning(f"Claude rate limited — waiting {wait}s (attempt {attempt+1}/3)")
                 time.sleep(wait)
+            except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as exc:
+                # 401 = key expired/revoked; 403 = credit exhausted or key disabled.
+                # This is the "key/subscription is finishing" signal — alert, then
+                # stop retrying (a bad key won't recover in 5s) and use the fallback.
+                log.error(f"Claude auth/permission error: {exc}")
+                self._notify_api_error(exc)
+                break
             except anthropic.APIError as exc:
                 log.error(f"Claude API error (attempt {attempt+1}/3): {exc}")
                 if attempt < 2:

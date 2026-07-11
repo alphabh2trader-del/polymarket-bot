@@ -61,13 +61,59 @@ QUERY_STOPWORDS = {
 }
 
 
+# Maps internal source-function names to the human service name shown in alerts.
+_SOURCE_LABELS = {
+    "_search_thenewsapi": "TheNewsAPI",
+    "_search_newsapi": "NewsAPI.org",
+    "_search_gnews": "GNews",
+}
+
+
 class NewsAggregator:
-    def __init__(self, newsapi_key: str = "", gnews_key: str = "", thenewsapi_key: str = ""):
+    def __init__(self, newsapi_key: str = "", gnews_key: str = "", thenewsapi_key: str = "",
+                 on_api_error=None):
         self.newsapi_key = newsapi_key
         self.gnews_key = gnews_key
         self.thenewsapi_key = thenewsapi_key
+        # Optional callback(service: str, reason: str) fired when a source fails
+        # with an auth/quota error (key expired/revoked/over-limit). Used to send
+        # a Telegram alert. Transient/network failures are NOT reported.
+        self.on_api_error = on_api_error
         self._session = requests.Session()
         self._session.headers.update({"User-Agent": "PolymarketBot/1.0"})
+
+    @staticmethod
+    def _classify_error(exc) -> str | None:
+        """Return an alert reason if exc is an auth/quota failure, else None.
+        Unwraps tenacity RetryError to reach the underlying HTTP error."""
+        try:
+            from tenacity import RetryError
+        except Exception:
+            RetryError = ()
+        e = exc
+        if RetryError and isinstance(e, RetryError):
+            try:
+                e = e.last_attempt.exception()
+            except Exception:
+                return None
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status in (401, 403):
+            return f"key rejected ({status}) — likely expired, revoked, or over its plan limit"
+        if status == 429:
+            return "quota hit (429) — the monthly allowance is likely exhausted"
+        return None
+
+    def _maybe_alert(self, source_fn_name: str, exc) -> None:
+        if self.on_api_error is None:
+            return
+        reason = self._classify_error(exc)
+        if reason is None:
+            return  # transient/network error — not a key/subscription problem
+        service = _SOURCE_LABELS.get(source_fn_name, source_fn_name)
+        try:
+            self.on_api_error(service, reason)
+        except Exception as exc2:
+            log.debug(f"API-error alert callback failed: {exc2}")
 
     # ------------------------------------------------------------------ #
     # Main search interface                                                #
@@ -97,6 +143,7 @@ class NewsAggregator:
                         articles.append(a)
             except Exception as exc:
                 log.warning(f"News source {source_fn.__name__} failed: {exc}")
+                self._maybe_alert(source_fn.__name__, exc)
 
         articles.sort(key=lambda a: a.published_at.replace(tzinfo=None), reverse=True)
         log.debug(f"Found {len(articles)} articles for query '{query}'")
