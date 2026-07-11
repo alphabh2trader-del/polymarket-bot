@@ -651,12 +651,13 @@ elif page == "✅  Wins":
     else:
         if search.strip():
             df_wins = df_wins[df_wins["_question"].str.contains(search.strip(), case=False, na=False)]
-        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Expected/$100", "Live/$100", "Net/$100", "Confidence"]
-        st.dataframe(
-            df_wins[display_cols].reset_index(drop=True),
-            hide_index=True,
-            height=620,
+        # Just the essentials: the bet, what was expected, the actual profit, and
+        # the profit after the bid/ask spread (all per $100 staked).
+        simple = df_wins[["Market", "Expected/$100", "Live/$100", "Net/$100"]].rename(
+            columns={"Expected/$100": "Expected ($100)", "Live/$100": "Profit ($100)",
+                     "Net/$100": "Net Profit ($100)"}
         )
+        st.dataframe(simple.reset_index(drop=True), hide_index=True, height=620)
 
 # ------------------------------------------------------------------ #
 # LOSSES                                                               #
@@ -677,12 +678,13 @@ elif page == "❌  Losses":
     else:
         if search.strip():
             df_losses = df_losses[df_losses["_question"].str.contains(search.strip(), case=False, na=False)]
-        display_cols = ["Time", "Market", "Side", "Entry", "Target", "Current", "Expected/$100", "Live/$100", "Net/$100", "Confidence"]
-        st.dataframe(
-            df_losses[display_cols].reset_index(drop=True),
-            hide_index=True,
-            height=620,
+        # Just the essentials: the bet, what was expected, the actual profit, and
+        # the profit after the bid/ask spread (all per $100 staked).
+        simple = df_losses[["Market", "Expected/$100", "Live/$100", "Net/$100"]].rename(
+            columns={"Expected/$100": "Expected ($100)", "Live/$100": "Profit ($100)",
+                     "Net/$100": "Net Profit ($100)"}
         )
+        st.dataframe(simple.reset_index(drop=True), hide_index=True, height=620)
 
 # ------------------------------------------------------------------ #
 # Auto-refresh every 30 s                                             #

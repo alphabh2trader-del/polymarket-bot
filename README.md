@@ -103,7 +103,7 @@ The price-checking uses Polymarket's free public API, so positions are watched c
 
 > **Realistic-fill P&L:** paper P&L assumes a mid-price fill, which real orders never get. At entry the bot now records the live bid/ask spread, so the dashboard can show a **net-of-spread** estimate alongside the raw paper number — the honest figure to weigh before going live.
 
-**Wins / Losses** — searchable tables of every closed position. Auto-refreshes every 30 seconds. All times shown in **Eastern (America/Toronto)**.
+**Wins / Losses** — searchable tables of every closed position, pared down to the essentials: the **bet**, what was **Expected ($100)**, the actual **Profit ($100)**, and the **Net Profit ($100)** after the bid/ask spread. Auto-refreshes every 30 seconds.
 
 ---
 
