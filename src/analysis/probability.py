@@ -132,10 +132,16 @@ class ProbabilityEstimator:
             try:
                 kwargs = dict(
                     model=self.model,
-                    # Sonnet 5 runs adaptive thinking by default and thinking
-                    # tokens count against max_tokens, so leave generous room —
-                    # 800 was enough for Haiku's bare JSON but truncates here.
-                    max_tokens=4000,
+                    # COST CONTROL: Sonnet 5 runs adaptive thinking by DEFAULT,
+                    # and thinking tokens (billed at the $10/1M output rate) are
+                    # what made this expensive — a single estimate could emit
+                    # thousands of thinking tokens. This task is just "read news,
+                    # output one JSON probability"; it does not need extended
+                    # reasoning. Disabling thinking cuts output tokens ~80% and is
+                    # the main lever keeping the daily bill low. max_tokens is now
+                    # a tight ceiling on the bare JSON answer.
+                    max_tokens=1200,
+                    thinking={"type": "disabled"},
                     system=SYSTEM_PROMPT,
                     messages=[{"role": "user", "content": prompt}],
                     timeout=90.0,
@@ -186,6 +192,23 @@ class ProbabilityEstimator:
                 self._notify_api_error(exc)
                 break
             except anthropic.APIError as exc:
+                # Credit-exhausted comes back as a 400 invalid_request_error, NOT a
+                # 401/403 — so it never reached _notify_api_error and the balance
+                # could drain to zero with no Telegram warning. Detect it here,
+                # alert once, and stop retrying (more attempts can't help).
+                msg = str(getattr(exc, "message", "") or exc).lower()
+                if "credit balance" in msg or "too low" in msg or "billing" in msg:
+                    log.error(f"Claude credit balance exhausted: {exc}")
+                    if self.on_api_error is not None:
+                        try:
+                            self.on_api_error(
+                                "Anthropic Claude",
+                                "credit balance exhausted — the bot has stopped "
+                                "thinking; add funds to resume",
+                            )
+                        except Exception as exc2:
+                            log.debug(f"Billing alert failed: {exc2}")
+                    break
                 log.error(f"Claude API error (attempt {attempt+1}/3): {exc}")
                 if attempt < 2:
                     time.sleep(5)

@@ -57,7 +57,12 @@ class Settings(BaseSettings):
     # search, so web_search_max_per_day * ~$0.02 (fee + extra tokens it pulls in)
     # is the rough daily ceiling this feature adds — 100 keeps it near ~$2/day and
     # comfortably under the $4/day budget. Lower the cap to spend less.
-    web_search_enabled: bool = True
+    # DISABLED after it burned through the API balance. Root cause: removing the
+    # NewsAPI/GNews backups left most markets with < news_threshold articles, so
+    # this fired on almost every market and pulled expensive web content into the
+    # context on each one. Off until the gate is re-designed. Do NOT flip back on
+    # without also raising news_threshold / lowering the daily cap hard.
+    web_search_enabled: bool = False
     web_search_news_threshold: int = 3     # only search when fewer than this many articles were found
     web_search_max_uses_per_market: int = 2  # max searches Claude may run within one market's analysis
     web_search_max_per_day: int = 100      # hard daily cap on total searches (cost backstop)
