@@ -106,6 +106,13 @@ class ProbabilityEstimator:
         allow_web_search: bool = False,
         web_search_max_uses: int = 2,
     ) -> ProbabilityEstimate:
+        # Master pause backstop: refuse to touch the API while paused, from ANY
+        # caller (scan OR thesis re-check). Returns the market price as a no-cost
+        # fallback estimate. This is the belt to run_scan's suspenders.
+        from config.settings import settings as _settings
+        if _settings.paused:
+            return self._fallback_estimate(yes_price)
+
         prompt = ESTIMATION_PROMPT.format(
             question=question,
             description=description or "No additional description provided.",

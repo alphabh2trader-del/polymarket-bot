@@ -189,6 +189,12 @@ class MarketScanner:
     # ------------------------------------------------------------------ #
 
     def run_scan(self) -> int:
+        if settings.paused:
+            log.warning(
+                "Bot is PAUSED (settings.paused=True) — skipping scan. No Claude "
+                "calls, no cost. Set paused=False and redeploy to resume."
+            )
+            return -1
         started_at = datetime.utcnow()
         log.info("=== Scan started ===")
 

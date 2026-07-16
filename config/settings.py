@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     # --- News ---
     thenewsapi_key: str = Field(default="", description="TheNewsAPI.com token (only keyed news source; free RSS is the fallback)")
 
+    # --- MASTER PAUSE SWITCH ---
+    # When True, the bot makes NO Claude calls at all: scans are skipped and the
+    # estimator refuses to hit the API. This is the "stop spending money" switch.
+    # Set back to False (and redeploy) to resume trading. Safe to add API credit
+    # while paused — nothing will be spent until this is flipped off.
+    paused: bool = True
+
     # --- LLM ---
     anthropic_api_key: str = Field(default="", description="Anthropic Claude API key")
     anthropic_model: str = "claude-sonnet-5"
