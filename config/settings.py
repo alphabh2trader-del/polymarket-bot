@@ -57,7 +57,9 @@ class Settings(BaseSettings):
     # estimator refuses to hit the API. This is the "stop spending money" switch.
     # Set back to False (and redeploy) to resume trading. Safe to add API credit
     # while paused — nothing will be spent until this is flipped off.
-    paused: bool = True
+    # 2026-07-15: resumed after adding credit; cost now bounded ~$1.5/day
+    # (web search off, thinking off, restart-storm guard, capped re-checks).
+    paused: bool = False
 
     # --- LLM ---
     anthropic_api_key: str = Field(default="", description="Anthropic Claude API key")
