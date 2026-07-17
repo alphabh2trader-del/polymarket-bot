@@ -105,6 +105,25 @@ class MarketScanner:
         with self._search_lock:
             self._searches_today += n
 
+    def _minutes_since_last_scan(self) -> Optional[float]:
+        """Minutes since the most recent COMPLETED scan, read from the DB so it
+        survives restarts. None if no scan has ever completed. Used to skip the
+        startup scan when the bot restarts shortly after a scan (restart storm)."""
+        try:
+            with get_session() as session:
+                run = (
+                    session.query(ScanRun)
+                    .filter(ScanRun.completed_at.isnot(None))
+                    .order_by(ScanRun.completed_at.desc())
+                    .first()
+                )
+                if run is None or run.completed_at is None:
+                    return None
+                return (datetime.utcnow() - run.completed_at).total_seconds() / 60.0
+        except Exception as exc:
+            log.debug(f"Cannot read last scan time: {exc}")
+            return None
+
     # ------------------------------------------------------------------ #
     # Scheduler                                                            #
     # ------------------------------------------------------------------ #
@@ -122,8 +141,20 @@ class MarketScanner:
         # Backfill predictions from any opportunities saved before prediction tracking existed
         self._backfill_predictions()
 
-        # Run scan + resolution check immediately on startup
-        self.run_scan()
+        # Run a scan immediately on startup — UNLESS one ran very recently. This
+        # stops a restart storm (many deploys/crashes in a short window) from each
+        # firing a full paid scan. The check reads the last scan time from the DB,
+        # so it survives restarts (the old in-memory search cap did not, which is
+        # how a deploy storm ran up the bill before).
+        mins = self._minutes_since_last_scan()
+        gap = settings.startup_scan_min_gap_minutes
+        if mins is not None and mins < gap:
+            log.info(
+                f"Skipping startup scan — last scan was {mins:.0f} min ago "
+                f"(< {gap} min gap). The scheduled scan will run on its normal cadence."
+            )
+        else:
+            self.run_scan()
         self._run_resolution_check()
 
         # Recurring Claude scan on the configured interval (hourly by default)

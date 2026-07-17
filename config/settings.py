@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     # --- News ---
     thenewsapi_key: str = Field(default="", description="TheNewsAPI.com token (only keyed news source; free RSS is the fallback)")
 
+    # Minimum minutes between scans across restarts. The bot scans immediately on
+    # startup; without this, a burst of restarts (deploys, crashes, platform
+    # blips) would each fire a full paid scan. This gap is checked against the
+    # last scan time IN THE DATABASE, so it survives restarts (unlike an
+    # in-memory guard). A restart within this window skips the startup scan.
+    startup_scan_min_gap_minutes: int = 30
+
     # --- MASTER PAUSE SWITCH ---
     # When True, the bot makes NO Claude calls at all: scans are skipped and the
     # estimator refuses to hit the API. This is the "stop spending money" switch.
