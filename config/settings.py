@@ -59,7 +59,8 @@ class Settings(BaseSettings):
     # while paused — nothing will be spent until this is flipped off.
     # 2026-07-15: resumed after adding credit; cost now bounded ~$1.5/day
     # (web search off, thinking off, restart-storm guard, capped re-checks).
-    paused: bool = False
+    # 2026-07-21: PAUSED AGAIN at user's request while deciding next steps.
+    paused: bool = True
 
     # --- LLM ---
     anthropic_api_key: str = Field(default="", description="Anthropic Claude API key")
